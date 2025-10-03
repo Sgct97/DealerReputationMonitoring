@@ -395,9 +395,17 @@ class GoogleReviewsScraper:
                         'review_url': review_url
                     }
                     reviews.append(review)
+                else:
+                    # Log skipped reviews for debugging
+                    reason = []
+                    if not reviewer_name:
+                        reason.append("no name")
+                    if not review_text:
+                        reason.append("no text")
+                    print(f"⊘ Skipped review #{idx}: {', '.join(reason)} | Rating: {star_rating}-star")
                     
             except Exception as e:
-                print(f"Error extracting review: {e}")
+                print(f"Error extracting review #{idx}: {e}")
                 continue
         
         return reviews
