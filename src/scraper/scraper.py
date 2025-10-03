@@ -9,6 +9,45 @@ import time
 import random
 
 
+# SELECTOR CONFIGURATION - Update here if Google changes their UI
+# 
+# HOW TO TEST FALLBACKS:
+# To test a fallback selector, simply comment out the ones above it.
+# Example: To test if 'div[data-review-id]' works as backup:
+#   Comment out 'div.GHT2ce' and run the scraper
+#   If it still works, the fallback is good!
+#
+SELECTORS = {
+    'REVIEW_CONTAINER': [
+        'div.GHT2ce',                    # PRIMARY - Verified working
+    ],
+    'REVIEWER_NAME': [
+        'button.al6Kxe div.d4r55',       # PRIMARY - Verified working
+    ],
+    'REVIEW_TEXT': [
+        'span.wiI7pd',                   # PRIMARY - Verified working
+    ],
+    'STAR_RATING': [
+        'span.kvMYJc[aria-label]',       # PRIMARY
+        'span[role="img"][aria-label]',  # BACKUP - VERIFIED WORKING ✅
+        'span[aria-label*="star"]'       # BACKUP - VERIFIED WORKING ✅
+    ],
+    'REVIEW_DATE': [
+        'span.rsqaWe',                   # PRIMARY
+    ],
+    'MORE_BUTTON': [
+        'button.w8nwRe',                 # PRIMARY
+        'button:has-text("More")'        # BACKUP - VERIFIED WORKING ✅
+    ]
+}
+
+# TO TEST A FALLBACK:
+# 1. Comment out selectors above the one you want to test
+# 2. Run: ./venv/bin/python3 test_scraping_only.py
+# 3. Check if it still works - if yes, that fallback is valid!
+# 4. Uncomment the selectors you commented out
+
+
 class GoogleReviewsScraper:
     """Scrapes reviews from a Google Business Profile."""
     
@@ -68,6 +107,32 @@ class GoogleReviewsScraper:
         """Add a random delay to mimic human behavior."""
         time.sleep(random.uniform(min_seconds, max_seconds))
     
+    def _try_selectors(self, element, selector_list: List[str], get_text: bool = True):
+        """
+        Try multiple selectors in order until one works.
+        
+        Args:
+            element: Playwright element to search within
+            selector_list: List of selectors to try
+            get_text: If True, return inner_text(), else return the element
+        
+        Returns:
+            Text content or element if found, None otherwise
+        """
+        for selector in selector_list:
+            try:
+                found = element.query_selector(selector)
+                if found:
+                    if get_text:
+                        text = found.inner_text().strip()
+                        if text:
+                            return text
+                    else:
+                        return found
+            except:
+                continue
+        return None
+    
     def scrape_reviews(self, business_url: str, db_manager=None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
         """
         Scrape reviews from a Google Business Profile with intelligent scrolling.
@@ -119,9 +184,19 @@ class GoogleReviewsScraper:
             except Exception as e:
                 print(f"Could not click reviews tab (might already be there): {e}")
             
-            # Wait for reviews to load
+            # Wait for reviews to load using fallback selectors
             print("Waiting for reviews to load...")
-            page.wait_for_selector('div.GHT2ce', timeout=10000)
+            reviews_loaded = False
+            for selector in SELECTORS['REVIEW_CONTAINER']:
+                try:
+                    page.wait_for_selector(selector, timeout=10000)
+                    reviews_loaded = True
+                    break
+                except:
+                    continue
+            
+            if not reviews_loaded:
+                raise Exception("Reviews did not load - all selectors failed")
             
             # Click the sort button
             print("Clicking sort button...")
@@ -161,8 +236,8 @@ class GoogleReviewsScraper:
                 self._random_delay(2, 3)
                 scroll_count += 1
                 
-                # Get current reviews
-                current_elements = page.query_selector_all('div.GHT2ce')
+                # Get current reviews using first available selector
+                current_elements = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
                 
                 # Progress update
                 if scroll_count % 5 == 0:
@@ -204,14 +279,26 @@ class GoogleReviewsScraper:
                     print(f"⚠️  Reached safety limit of {safety_limit} scrolls")
                     break
             
-            # Get final count
-            current_elements = page.query_selector_all('div.GHT2ce')
+            # Get final count using first available selector
+            current_elements = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
             print(f"Scrolled {scroll_count} times, found {len(current_elements)} review elements")
             
-            # Expand all "More" buttons to get full review text
+            # Expand all "More" buttons to get full review text using robust fallback
             print("Expanding reviews to get full text...")
-            more_buttons = page.query_selector_all('button.w8nwRe')  # "More" button class
-            print(f"Found {len(more_buttons)} 'More' buttons to click")
+            more_buttons = None
+            for selector in SELECTORS['MORE_BUTTON']:
+                try:
+                    buttons = page.query_selector_all(selector)
+                    if buttons and len(buttons) > 0:
+                        more_buttons = buttons
+                        print(f"✓ Found {len(more_buttons)} 'More' buttons using: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not more_buttons:
+                print("⚠️ No 'More' buttons found (reviews might already be expanded)")
+                more_buttons = []
             for idx, button in enumerate(more_buttons):
                 try:
                     if button.is_visible():
@@ -252,55 +339,48 @@ class GoogleReviewsScraper:
         """
         reviews = []
         
-        # Find all review containers
-        review_elements = page.query_selector_all('div.GHT2ce')
+        # Find all review containers using multiple fallback selectors
+        review_elements = None
+        for selector in SELECTORS['REVIEW_CONTAINER']:
+            try:
+                elements = page.query_selector_all(selector)
+                if elements and len(elements) > 0:
+                    review_elements = elements
+                    print(f"✓ Using review container selector: {selector}")
+                    break
+            except:
+                continue
+        
+        if not review_elements:
+            raise Exception("Could not find review containers with any known selector")
         
         print(f"Found {len(review_elements)} review elements")
         
         for idx, element in enumerate(review_elements):
             try:
                 
-                # Extract reviewer name (inside button element)
-                # Try multiple selectors to find the name
-                name_selectors = [
-                    'button.al6Kxe div.d4r55',  # More specific - the reviewer button
-                    'button div.d4r55',
-                    'div.d4r55.fontTitleMedium',
-                    'div.d4r55'
-                ]
+                # Extract reviewer name using robust fallback selectors
+                reviewer_name = self._try_selectors(element, SELECTORS['REVIEWER_NAME'])
                 
-                reviewer_name = "Anonymous"
-                for selector in name_selectors:
-                    name_elem = element.query_selector(selector)
-                    if name_elem:
-                        text = name_elem.inner_text().strip()
-                        if text and text != "":
-                            reviewer_name = text
-                            break
+                # If no name found, try previous element (reviews come in pairs)
+                if not reviewer_name and idx > 0:
+                    reviewer_name = self._try_selectors(review_elements[idx - 1], SELECTORS['REVIEWER_NAME'])
                 
-                # If no name found, try to get it from the previous sibling element (reviews come in pairs)
-                if reviewer_name == "Anonymous" and idx > 0:
-                    prev_elem = review_elements[idx - 1]
-                    for selector in name_selectors:
-                        name_elem = prev_elem.query_selector(selector)
-                        if name_elem:
-                            text = name_elem.inner_text().strip()
-                            if text and text != "":
-                                reviewer_name = text
-                                break
-                        if reviewer_name != "Anonymous":
-                            break
+                if not reviewer_name:
+                    reviewer_name = "Anonymous"
                 
-                # Extract star rating from aria-label
+                # Extract star rating using robust fallback
                 star_rating = self._parse_star_rating(element)
                 
-                # Extract review text
-                text_elem = element.query_selector('span.wiI7pd')
-                review_text = text_elem.inner_text() if text_elem else ""
+                # Extract review text using robust fallback
+                review_text = self._try_selectors(element, SELECTORS['REVIEW_TEXT'])
+                if not review_text:
+                    review_text = ""
                 
-                # Extract review date
-                date_elem = element.query_selector('span.rsqaWe')
-                review_date = date_elem.inner_text() if date_elem else "Unknown date"
+                # Extract review date using robust fallback
+                review_date = self._try_selectors(element, SELECTORS['REVIEW_DATE'])
+                if not review_date:
+                    review_date = "Unknown date"
                 
                 # Get review URL
                 review_url = page.url
@@ -324,7 +404,7 @@ class GoogleReviewsScraper:
     
     def _parse_star_rating(self, review_element) -> int:
         """
-        Parse the star rating from a review element.
+        Parse the star rating from a review element using robust fallback selectors.
         
         Args:
             review_element: The review container element
@@ -332,18 +412,19 @@ class GoogleReviewsScraper:
         Returns:
             Star rating as an integer (1-5)
         """
-        try:
-            # Find the star rating element with aria-label
-            star_elem = review_element.query_selector('span.kvMYJc[aria-label]')
-            if star_elem:
-                aria_label = star_elem.get_attribute('aria-label')
-                # aria-label is like "1 star", "2 stars", "5 stars", etc.
-                if aria_label:
-                    # Extract the number from the label
-                    rating_str = aria_label.split()[0]  # Get first word (the number)
-                    return int(rating_str)
-        except:
-            pass
+        # Try multiple selectors for star rating
+        for selector in SELECTORS['STAR_RATING']:
+            try:
+                star_elem = review_element.query_selector(selector)
+                if star_elem:
+                    aria_label = star_elem.get_attribute('aria-label')
+                    # aria-label is like "1 star", "2 stars", "5 stars", etc.
+                    if aria_label:
+                        # Extract the number from the label
+                        rating_str = aria_label.split()[0]  # Get first word (the number)
+                        return int(rating_str)
+            except:
+                continue
         
         return 0  # Default if we can't parse
     
