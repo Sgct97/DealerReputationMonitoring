@@ -81,6 +81,20 @@ def main():
     print("\n📊 Initializing database...")
     db = DatabaseManager(database_path)
     
+    # Extract dealership name from URL or use default
+    dealership_name = "Dealership"  # Default
+    try:
+        # Try to extract name from URL (e.g., "Crown+Honda" → "Crown Honda")
+        url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
+        if url_parts:
+            dealership_name = url_parts.split('@')[0].replace('+', ' ')
+    except:
+        pass
+    
+    # Add or get dealership
+    dealership_id = db.add_dealership(dealership_name, business_url)
+    print(f"📍 Monitoring: {dealership_name} (ID: {dealership_id})")
+    
     print("🤖 Initializing AI analyzer...")
     analyzer = ReviewAnalyzer(openai_api_key)
     
@@ -123,18 +137,16 @@ def main():
             new_reviews_count = 0
             
             for review in tracked_reviews:
-                # Check if this is a new review
+                # Check if this is a new review for this dealership
                 if not db.review_exists(
                     review['reviewer_name'],
                     review['review_text'],
-                    review['review_date']
+                    review['review_date'],
+                    dealership_id
                 ):
                     print(f"\n🆕 New {review['star_rating']}-star review detected from: {review['reviewer_name']}")
                     
-                    # Add to database
-                    db.add_review(review)
-                    
-                    # Analyze with AI
+                    # Analyze with AI first
                     print("   🤖 Analyzing with AI...")
                     ai_analysis = analyzer.analyze_review(
                         review['review_text'],
@@ -142,6 +154,9 @@ def main():
                     )
                     
                     print(f"   ✓ Recommended category: {ai_analysis['category']}")
+                    
+                    # Add to database with AI analysis
+                    db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
                     
                     # Send notification
                     print("   📧 Sending email notification...")
@@ -157,9 +172,9 @@ def main():
                         new_reviews_count += 1
                     else:
                         print("   ❌ Failed to send email")
-                else:
-                    # Review already in database
-                    pass
+            
+            # Update dealership last scraped time
+            db.update_dealership_last_scraped(dealership_id)
             
             # Print summary
             print("\n" + "=" * 60)

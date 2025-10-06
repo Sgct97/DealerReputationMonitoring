@@ -199,28 +199,32 @@ class GoogleReviewsScraper:
         page = context.new_page()
         
         try:
-            print(f"Navigating to: {business_url}")
+            from datetime import datetime
+            
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Navigating to: {business_url}")
             page.goto(business_url, wait_until='domcontentloaded', timeout=30000)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Page loaded")
             
             self._random_delay(2, 4)
             
             # Click on the reviews tab
-            print("Looking for reviews tab...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Looking for reviews tab...")
             try:
                 reviews_button = page.locator('button:has-text("Reviews")').first
                 reviews_button.click()
-                print("✓ Clicked reviews tab")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Clicked reviews tab")
                 self._random_delay(2, 3)
             except Exception as e:
-                print(f"Could not click reviews tab (might already be there): {e}")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Could not click reviews tab: {e}")
             
             # Wait for reviews to load using fallback selectors
-            print("Waiting for reviews to load...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting for reviews to load...")
             reviews_loaded = False
             for selector in SELECTORS['REVIEW_CONTAINER']:
                 try:
                     page.wait_for_selector(selector, timeout=10000)
                     reviews_loaded = True
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Reviews loaded")
                     break
                 except:
                     continue
@@ -229,19 +233,18 @@ class GoogleReviewsScraper:
                 raise Exception("Reviews did not load - all selectors failed")
             
             # Click the sort button
-            print("Clicking sort button...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Clicking sort button...")
             try:
                 sort_button = page.locator('button:has-text("Sort")').first
-                sort_button.click()
-                print("✓ Clicked sort button")
+                sort_button.click(timeout=10000)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Clicked sort button")
                 self._random_delay(1, 2)
                 
                 # Click "Lowest rating" option from the dropdown
-                print("Selecting 'Lowest rating' option...")
-                # The dropdown menu should now be visible
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Selecting 'Lowest rating' option...")
                 lowest_rating_option = page.locator('div[role="menuitemradio"]:has-text("Lowest")').first
-                lowest_rating_option.click()
-                print("✓ Selected lowest rating")
+                lowest_rating_option.click(timeout=10000)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Selected lowest rating")
                 self._random_delay(2, 3)
                 
             except Exception as e:
@@ -349,8 +352,8 @@ class GoogleReviewsScraper:
                 print("⚠️ Could not expand reviews - using truncated text")
             self._random_delay(1, 2)
             
-            # Extract review data
-            reviews = self._extract_reviews(page)
+            # Extract review data (will capture report URL for each review)
+            reviews = self._extract_reviews(page, context)
             
             print(f"Successfully scraped {len(reviews)} reviews")
             
@@ -365,7 +368,7 @@ class GoogleReviewsScraper:
         finally:
             context.close()
     
-    def _extract_reviews(self, page: Page) -> List[Dict]:
+    def _extract_reviews(self, page: Page, context) -> List[Dict]:
         """
         Extract review data from the page.
         
@@ -420,11 +423,11 @@ class GoogleReviewsScraper:
                 if not review_date:
                     review_date = "Unknown date"
                 
-                # Get review URL
-                review_url = page.url
-                
                 # Only add if we have the essential data
                 if reviewer_name and review_text:
+                    # Get direct report URL by clicking through the UI (only for reviews we're keeping)
+                    review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                    
                     review = {
                         'reviewer_name': reviewer_name,
                         'star_rating': star_rating,
@@ -474,21 +477,87 @@ class GoogleReviewsScraper:
         
         return 0  # Default if we can't parse
     
-    def _get_review_url(self, review_element, page_url: str) -> str:
+    def _get_report_url_by_clicking(self, review_element, page, context, reviewer_name: str) -> str:
         """
-        Get a direct URL to the review (if possible).
+        Get the direct report URL by actually clicking Report review button.
         
         Args:
             review_element: The review container element
-            page_url: The current page URL
+            page: Playwright page object
+            context: Playwright context object
+            reviewer_name: The reviewer's name to identify the correct review
         
         Returns:
-            URL string
+            Direct report URL, or business URL as fallback
         """
-        # TODO: Determine if we can get a direct link to individual reviews
-        # Otherwise, return the business profile URL
+        from datetime import datetime
+        from urllib.parse import urlparse, parse_qs, unquote
         
-        return page_url  # Placeholder
+        try:
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}] 🔗 Getting report URL for {reviewer_name[:20]}...")
+            
+            # First, ensure any dropdowns are closed
+            try:
+                page.keyboard.press('Escape')
+                page.wait_for_timeout(200)
+            except:
+                pass
+            
+            # Scroll the review into view first to ensure it's not stale
+            try:
+                review_element.scroll_into_view_if_needed(timeout=2000)
+                page.wait_for_timeout(300)
+            except:
+                pass
+            
+            # Find the 3-dot action menu button - use PAGE level query (like capture_report_url.py that works)
+            # Match by reviewer name in aria-label
+            action_button = page.query_selector(f'button[aria-label*="Actions for"][aria-label*="{reviewer_name[:10]}"]')
+            
+            if not action_button:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No action button found for {reviewer_name}")
+                return page.url
+            
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Found action button, clicking...")
+            # Click the 3-dot menu
+            action_button.click()
+            page.wait_for_timeout(800)
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Clicked action button")
+            
+            # Click "Report review" and capture new tab
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   Looking for Report review option...")
+            with context.expect_page(timeout=5000) as new_page_info:
+                report_item = page.locator('[role="menuitemradio"]:has-text("Report review")').first
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   Clicking Report review...")
+                report_item.click(timeout=3000)
+            
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Clicked Report review, getting new page...")
+            # Get the new page (sign-in redirect)
+            new_page = new_page_info.value
+            signin_url = new_page.url
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
+            
+            # Close the tab immediately
+            new_page.close()
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Tab closed, parsing URL...")
+            
+            # Extract the real report URL from continue parameter
+            parsed = urlparse(signin_url)
+            params = parse_qs(parsed.query)
+            
+            if 'continue' in params:
+                real_report_url = unquote(params['continue'][0])
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
+                return real_report_url
+            else:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param in URL")
+                    
+        except Exception as e:
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ Error getting report URL: {e}")
+        
+        # Fallback: return business page URL
+        print(f"  [{datetime.now().strftime('%H:%M:%S')}]   Using fallback URL")
+        return page.url
     
     def filter_one_star_reviews(self, reviews: List[Dict]) -> List[Dict]:
         """

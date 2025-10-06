@@ -79,14 +79,16 @@ REASONING: [your compelling explanation for why this should be removed]
 Remember: Your job is to find the BEST reason to get this review removed, not to judge if it's legitimate."""
 
         try:
+            from datetime import datetime
+            current_date = datetime.now().strftime("%B %d, %Y")
+            
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-5-mini",
                 messages=[
-                    {"role": "system", "content": "You are an expert analyst specializing in identifying policy violations in online reviews."},
+                    {"role": "system", "content": f"You are an expert analyst specializing in identifying policy violations in online reviews. Today's date is {current_date}."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
-                max_tokens=300
+                max_completion_tokens=1000  # Needs room for reasoning tokens + actual response
             )
             
             content = response.choices[0].message.content.strip()
