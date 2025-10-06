@@ -218,3 +218,36 @@ class EmailNotifier:
 </html>
 """
         return html
+    
+    def send_failure_alert(self, subject: str, html_body: str) -> bool:
+        """
+        Send a failure alert email when scraping fails.
+        
+        Args:
+            subject: Email subject
+            html_body: HTML body content
+        
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        # Create message
+        message = MIMEMultipart('alternative')
+        message['Subject'] = subject
+        message['From'] = self.gmail_address
+        message['To'] = self.to_email
+        
+        # Attach HTML content
+        html_part = MIMEText(html_body, 'html')
+        message.attach(html_part)
+        
+        try:
+            # Connect to Gmail's SMTP server
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                server.login(self.gmail_address, self.gmail_app_password)
+                server.send_message(message)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error sending failure alert: {str(e)}")
+            return False

@@ -180,6 +180,40 @@ def main():
         print(f"\n❌ Error during execution: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # Send failure alert email
+        try:
+            print("\n📧 Sending failure alert email...")
+            failure_subject = f"🚨 Dealer Reputation Keeper - Scraping Failed"
+            failure_body = f"""
+            <h2 style="color: #dc3545;">Scraping Failed</h2>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <p><strong>Business URL:</strong> {business_url}</p>
+            <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            
+            <h3>Possible Causes:</h3>
+            <ul>
+                <li>Google changed their UI - selectors need updating</li>
+                <li>Proxy was blocked</li>
+                <li>Network connectivity issue</li>
+                <li>Website timeout</li>
+            </ul>
+            
+            <p><strong>Action Required:</strong> Check the error message and update selectors if needed.</p>
+            <p>See FINDING_SELECTORS.md for instructions.</p>
+            
+            <hr>
+            <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;">
+{traceback.format_exc()}
+            </pre>
+            """
+            
+            from datetime import datetime
+            notifier.send_failure_alert(failure_subject, failure_body)
+            print("✓ Failure alert sent")
+        except Exception as email_error:
+            print(f"⚠️ Could not send failure alert: {email_error}")
+        
         sys.exit(1)
     
     print("\n✅ Execution completed successfully")

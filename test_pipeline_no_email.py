@@ -80,13 +80,18 @@ def main():
             stats = db.get_stats()
             is_initial_run = stats['total_reviews'] == 0
             
+            # Parse star ratings to track
+            star_ratings_str = os.getenv('STAR_RATINGS_TO_TRACK', '1')
+            star_ratings_to_track = [int(x.strip()) for x in star_ratings_str.split(',')]
+            ratings_str = ','.join(map(str, star_ratings_to_track))
+            
             if is_initial_run:
                 limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
-                print(f"📊 Initial run detected - will scrape {limit_text} 1-star reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, scrape_all=True, max_reviews=initial_scrape_limit)
+                print(f"📊 Initial run detected - will scrape {limit_text} {ratings_str}-star reviews")
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
             else:
-                print("📊 Incremental run - will stop at known reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, stop_at_seen=3)
+                print(f"📊 Incremental run - will stop at known {ratings_str}-star reviews")
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
             
             if not all_reviews:
                 print("⚠️  No reviews found. This could mean:")
@@ -97,14 +102,14 @@ def main():
             
             print(f"✓ Found {len(all_reviews)} total reviews")
             
-            # Filter for 1-star reviews
-            one_star_reviews = scraper.filter_one_star_reviews(all_reviews)
-            print(f"✓ Found {len(one_star_reviews)} one-star reviews")
+            # Filter for tracked star ratings
+            tracked_reviews = scraper.filter_reviews_by_rating(all_reviews, star_ratings_to_track)
+            print(f"✓ Found {len(tracked_reviews)} review(s) with {ratings_str}-star rating(s)")
             
-            # Process each 1-star review
+            # Process each tracked review
             new_reviews_count = 0
             
-            for review in one_star_reviews:
+            for review in tracked_reviews:
                 # Check if this is a new review
                 if not db.review_exists(
                     review['reviewer_name'],

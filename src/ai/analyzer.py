@@ -10,16 +10,15 @@ from typing import Dict
 class ReviewAnalyzer:
     """Analyzes reviews using AI to determine the best reporting category."""
     
-    # Google's official review reporting categories
+    # Google's official review reporting categories (verified from actual Google Maps UI)
     REPORTING_CATEGORIES = [
-        "Off-topic",
-        "Spam",
-        "Conflict of interest",
+        "Low quality information",
+        "Fake or deceptive",
         "Profanity",
         "Bullying or harassment",
         "Discrimination or hate speech",
         "Personal information",
-        "Illegal content"
+        "Not helpful"
     ]
     
     def __init__(self, api_key: str):
@@ -59,10 +58,18 @@ CRITICAL INSTRUCTIONS:
 3. Choose the category that gives Google the strongest reason to remove this review
 4. Provide compelling reasoning (2-3 sentences) that makes a strong case for removal
 
-Strategic tips:
-- "Spam" works for vague, incomplete, or suspicious reviews
-- "Off-topic" works for reviews about the buying process rather than the actual product/service
-- "Conflict of interest" works if there's any hint of competitor involvement or ulterior motives
+Strategic tips based on Google's official policy:
+- "Low quality information" - Use for: off-topic content, ads, gibberish, repetitive text, vague complaints
+- "Fake or deceptive" - Use for: fake activity, incentivized/paid reviews, suspicious patterns, competitor sabotage
+- "Profanity" - Use for: swear words, pornographic content, sexually explicit language
+- "Bullying or harassment" - Use for: reviews that personally attack/target a specific employee by name
+- "Discrimination or hate speech" - Use for: harmful language about individuals/groups based on race, religion, gender, etc.
+- "Personal information" - Use ONLY for: actual phone numbers, physical addresses, email addresses (NOT just employee names)
+- "Not helpful" - Use for: reviews that don't help people decide whether to visit (very broad, strategic choice)
+
+IMPORTANT DISTINCTIONS:
+- Employee name + negative comment = "Bullying or harassment" (NOT Personal information)
+- Phone number or address in review = "Personal information"
 - Look for ANY policy violation angle, no matter how small
 
 Respond in the following format:

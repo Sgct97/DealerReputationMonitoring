@@ -51,14 +51,16 @@ SELECTORS = {
 class GoogleReviewsScraper:
     """Scrapes reviews from a Google Business Profile."""
     
-    def __init__(self, proxy_config: Optional[Dict] = None):
+    def __init__(self, proxy_config: Optional[Dict] = None, max_retries: int = 3):
         """
         Initialize the scraper.
         
         Args:
             proxy_config: Dictionary with proxy settings (server, username, password)
+            max_retries: Maximum number of retry attempts if scraping fails (default: 3)
         """
         self.proxy_config = proxy_config
+        self.max_retries = max_retries
         self.playwright = None
         self.browser = None
     
@@ -135,7 +137,7 @@ class GoogleReviewsScraper:
     
     def scrape_reviews(self, business_url: str, db_manager=None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
         """
-        Scrape reviews from a Google Business Profile with intelligent scrolling.
+        Scrape reviews with automatic retry logic and graceful degradation.
         
         Args:
             business_url: URL of the Google Business Profile
@@ -147,6 +149,34 @@ class GoogleReviewsScraper:
         
         Returns:
             List of dictionaries, each containing review data
+        """
+        # Retry logic with exponential backoff
+        for attempt in range(self.max_retries):
+            try:
+                if attempt > 0:
+                    wait_time = (2 ** attempt) * 5  # 10s, 20s, 40s
+                    print(f"\n🔄 Retry attempt {attempt + 1}/{self.max_retries} (waiting {wait_time}s first...)")
+                    time.sleep(wait_time)
+                
+                reviews = self._scrape_reviews_internal(business_url, db_manager, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track)
+                
+                if reviews:  # Success!
+                    return reviews
+                elif attempt < self.max_retries - 1:
+                    print(f"⚠️ Got 0 reviews - retrying...")
+                    
+            except Exception as e:
+                print(f"❌ Attempt {attempt + 1} failed: {str(e)}")
+                if attempt == self.max_retries - 1:
+                    # Last attempt failed - log and raise
+                    print(f"💥 All {self.max_retries} attempts failed")
+                    raise
+        
+        return []
+    
+    def _scrape_reviews_internal(self, business_url: str, db_manager=None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
+        """
+        Internal scraping logic (called by scrape_reviews with retry wrapper).
         """
         if not self.browser:
             self.start()
@@ -215,8 +245,9 @@ class GoogleReviewsScraper:
                 self._random_delay(2, 3)
                 
             except Exception as e:
-                print(f"Could not sort by lowest rating: {e}")
-                print("Continuing with default sort order...")
+                print(f"⚠️ Could not sort by lowest rating: {e}")
+                print("📊 GRACEFUL DEGRADATION: Continuing with default sort (newest first)")
+                print("   Will still capture reviews, just not sorted by lowest rating")
             
             # Simple aggressive scrolling - just keep scrolling until we hit the limit or max scrolls
             mode_text = f"scrape all mode - limit: {'UNLIMITED' if max_reviews == 0 else max_reviews}" if scrape_all else "stop at known reviews"
@@ -297,18 +328,25 @@ class GoogleReviewsScraper:
                     continue
             
             if not more_buttons:
-                print("⚠️ No 'More' buttons found (reviews might already be expanded)")
+                print("⚠️ No 'More' buttons found")
+                print("📊 GRACEFUL DEGRADATION: Reviews might be collapsed - will use truncated text")
                 more_buttons = []
+            
+            expanded_count = 0
             for idx, button in enumerate(more_buttons):
                 try:
                     if button.is_visible():
                         button.click()
-                        self._random_delay(0.2, 0.5)  # Short delay between clicks
+                        expanded_count += 1
+                        self._random_delay(0.2, 0.5)
                 except Exception as e:
                     # Some buttons might not be clickable, that's okay
                     pass
             
-            print("✓ All reviews expanded")
+            if expanded_count > 0:
+                print(f"✓ Expanded {expanded_count}/{len(more_buttons)} reviews")
+            else:
+                print("⚠️ Could not expand reviews - using truncated text")
             self._random_delay(1, 2)
             
             # Extract review data
