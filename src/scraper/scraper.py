@@ -336,6 +336,7 @@ class GoogleReviewsScraper:
                 more_buttons = []
             
             expanded_count = 0
+            failed_count = 0
             for idx, button in enumerate(more_buttons):
                 try:
                     if button.is_visible():
@@ -343,14 +344,19 @@ class GoogleReviewsScraper:
                         expanded_count += 1
                         self._random_delay(0.2, 0.5)
                 except Exception as e:
-                    # Some buttons might not be clickable, that's okay
-                    pass
+                    # Some buttons might not be clickable - log for debugging
+                    failed_count += 1
+                    if failed_count <= 3:  # Only show first 3 failures
+                        print(f"  ⚠️ More button {idx+1} failed: {type(e).__name__}")
             
             if expanded_count > 0:
-                print(f"✓ Expanded {expanded_count}/{len(more_buttons)} reviews")
+                print(f"✓ Expanded {expanded_count}/{len(more_buttons)} reviews ({failed_count} failed)")
             else:
                 print("⚠️ Could not expand reviews - using truncated text")
-            self._random_delay(1, 2)
+            
+            # Wait for DOM to stabilize after all More button clicks
+            print("⏳ Waiting for text expansion to complete...")
+            self._random_delay(3, 5)  # Longer wait for DOM to fully update
             
             # Extract review data (will capture report URL for each review)
             reviews = self._extract_reviews(page, context)
@@ -370,16 +376,17 @@ class GoogleReviewsScraper:
     
     def _extract_reviews(self, page: Page, context) -> List[Dict]:
         """
-        Extract review data from the page.
+        Extract review data from the page using two-pass approach:
+        Pass 1: Extract all text data while DOM is stable
+        Pass 2: Add report URLs by clicking (after text is safely captured)
         
         Args:
             page: Playwright page object
+            context: Playwright context object
         
         Returns:
             List of review dictionaries
         """
-        reviews = []
-        
         # Find all review containers using multiple fallback selectors
         review_elements = None
         for selector in SELECTORS['REVIEW_CONTAINER']:
@@ -397,9 +404,12 @@ class GoogleReviewsScraper:
         
         print(f"Found {len(review_elements)} review elements")
         
+        # PASS 1: Extract all text data (NO clicking report URLs)
+        print("📝 Pass 1: Extracting text data...")
+        reviews = []
+        
         for idx, element in enumerate(review_elements):
             try:
-                
                 # Extract reviewer name using robust fallback selectors
                 reviewer_name = self._try_selectors(element, SELECTORS['REVIEWER_NAME'])
                 
@@ -425,15 +435,19 @@ class GoogleReviewsScraper:
                 
                 # Only add if we have the essential data
                 if reviewer_name and review_text:
-                    # Get direct report URL by clicking through the UI (only for reviews we're keeping)
-                    review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                    # Log text length to verify More button expansion worked
+                    text_len = len(review_text)
+                    status = "✓" if text_len > 200 else "⚠️"
+                    if text_len < 200 or reviewer_name == "Mudiaga Ofuoku":
+                        print(f"  {status} {reviewer_name}: {text_len} chars")
                     
                     review = {
                         'reviewer_name': reviewer_name,
                         'star_rating': star_rating,
                         'review_text': review_text,
                         'review_date': review_date,
-                        'review_url': review_url
+                        'review_url': None,  # Will be filled in Pass 2
+                        'element': element   # Keep reference for Pass 2
                     }
                     reviews.append(review)
                 else:
@@ -448,6 +462,46 @@ class GoogleReviewsScraper:
             except Exception as e:
                 print(f"Error extracting review #{idx}: {e}")
                 continue
+        
+        print(f"✓ Pass 1 complete: Extracted {len(reviews)} reviews")
+        
+        # PASS 2: Add report URLs (NOW we can click safely)
+        print(f"🔗 Pass 2: Getting report URLs for {len(reviews)} reviews...")
+        
+        for idx, review in enumerate(reviews):
+            try:
+                print(f"\n  [{idx+1}/{len(reviews)}] Processing {review['reviewer_name']}...")
+                
+                element = review['element']
+                reviewer_name = review['reviewer_name']
+                
+                print(f"      Checking if element is still valid...")
+                try:
+                    # Test if element is still attached to DOM
+                    is_visible = element.is_visible()
+                    print(f"      ✓ Element is valid and visible: {is_visible}")
+                except Exception as elem_error:
+                    print(f"      ❌ Element is STALE: {elem_error}")
+                    raise
+                
+                print(f"      Calling _get_report_url_by_clicking...")
+                # Get direct report URL by clicking through the UI
+                review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                review['review_url'] = review_url
+                
+                # Remove element reference (don't need it anymore)
+                del review['element']
+                
+                print(f"      ✓ Got report URL for {reviewer_name}")
+                
+            except Exception as e:
+                print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
+                # Use fallback URL
+                review['review_url'] = page.url
+                if 'element' in review:
+                    del review['element']
+        
+        print(f"\n✓ Pass 2 complete: Added report URLs")
         
         return reviews
     
