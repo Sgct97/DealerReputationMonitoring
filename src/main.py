@@ -105,6 +105,7 @@ def main():
     print(f"\n🔍 Scraping reviews from: {business_url}")
     
     try:
+        import subprocess
         with GoogleReviewsScraper(proxy_config) as scraper:
             # Auto-detect if this is the initial run (empty database)
             stats = db.get_stats()
@@ -138,67 +139,83 @@ def main():
             new_reviews_count = 0
             
             for review in tracked_reviews:
-                # Check if this is a new review for this dealership
-                if not db.review_exists(
-                    review['reviewer_name'],
-                    review['review_text'],
-                    review['review_date'],
-                    dealership_id
-                ):
-                    print(f"\n🆕 New {review['star_rating']}-star review detected from: {review['reviewer_name']}")
-                    
-                    # Analyze with AI first
-                    print("   🤖 Analyzing with AI...")
-                    ai_analysis = analyzer.analyze_review(
+                try:
+                    # Check if this is a new review for this dealership
+                    if not db.review_exists(
+                        review['reviewer_name'],
                         review['review_text'],
-                        review['reviewer_name']
-                    )
-                    
-                    print(f"   ✓ Recommended category: {ai_analysis['category']}")
-                    
-                    # Add to database with AI analysis
-                    db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
-                    
-                    # Send notification (skip on initial run - only email for NEW reviews)
-                    if not is_initial_run:
-                        print("   📧 Sending email notification...")
-                        success = notifier.send_review_alert(review, ai_analysis)
+                        review['review_date'],
+                        dealership_id
+                    ):
+                        print(f"\n🆕 New {review['star_rating']}-star review detected from: {review['reviewer_name']}")
                         
-                        if success:
-                            print("   ✓ Email sent successfully")
-                            db.mark_as_notified(
-                                review['reviewer_name'],
+                        # Only analyze with AI on incremental runs (skip on initial baseline)
+                        ai_analysis = None
+                        if not is_initial_run:
+                            print("   🤖 Analyzing with AI...")
+                            ai_analysis = analyzer.analyze_review(
                                 review['review_text'],
-                                review['review_date']
+                                review['reviewer_name']
                             )
-                            new_reviews_count += 1
+                            print(f"   ✓ Recommended category: {ai_analysis['category']}")
                         else:
-                            print("   ❌ Failed to send email")
-                    else:
-                        print("   📧 Email skipped (initial run - baseline data)")
-                        new_reviews_count += 1
+                            print("   🤖 AI analysis skipped (initial run - baseline data)")
+                        
+                        # Add to database with AI analysis (if any)
+                        db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
+                        
+                        # Send notification (skip on initial run - only email for NEW reviews)
+                        if not is_initial_run:
+                            print("   📧 Sending email notification...")
+                            success = notifier.send_review_alert(review, ai_analysis)
+                            
+                            if success:
+                                print("   ✓ Email sent successfully")
+                                db.mark_as_notified(
+                                    review['reviewer_name'],
+                                    review['review_text'],
+                                    review['review_date']
+                                )
+                                new_reviews_count += 1
+                            else:
+                                print("   ❌ Failed to send email")
+                        else:
+                            print("   📧 Email skipped (initial run - baseline data)")
+                            new_reviews_count += 1
+                except Exception as review_error:
+                    print(f"   ❌ Error processing review from {review.get('reviewer_name', 'Unknown')}: {review_error}")
+                    print(f"   → Skipping this review and continuing with next one...")
+                    continue
             
             # Update dealership last scraped time
             db.update_dealership_last_scraped(dealership_id)
+        
+        # Clean up any zombie Chromium processes after scraper closes
+        try:
+            subprocess.run(['killall', '-9', 'Chromium'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            print("\n✓ Cleaned up browser processes")
+        except:
+            pass
             
-            # Print summary
-            print("\n" + "=" * 60)
-            print("📈 Summary")
-            print("=" * 60)
-            
-            if new_reviews_count > 0:
-                print(f"✓ {new_reviews_count} new {ratings_str}-star review(s) detected and reported")
-            else:
-                print(f"✓ No new {ratings_str}-star reviews detected")
-            
-            stats = db.get_stats()
-            print(f"📊 Total reviews tracked: {stats['total_reviews']}")
-            print(f"⭐ Reviews with tracked ratings ({ratings_str}-star): {stats['one_star_reviews']}")
-            print(f"📧 Total notifications sent: {stats['notified_count']}")
-            
+        # Print summary
+        print("\n" + "=" * 60)
+        print("📈 Summary")
+        print("=" * 60)
+        
+        if new_reviews_count > 0:
+            print(f"✓ {new_reviews_count} new {ratings_str}-star review(s) detected and reported")
+        else:
+            print(f"✓ No new {ratings_str}-star reviews detected")
+        
+        stats = db.get_stats()
+        print(f"📊 Total reviews tracked: {stats['total_reviews']}")
+        print(f"⭐ Reviews with tracked ratings ({ratings_str}-star): {stats['one_star_reviews']}")
+        print(f"📧 Total notifications sent: {stats['notified_count']}")
+    
     except Exception as e:
         print(f"\n❌ Error during execution: {str(e)}")
         import traceback
+        from datetime import datetime as dt
         traceback.print_exc()
         
         # Send failure alert email
@@ -209,7 +226,7 @@ def main():
             <h2 style="color: #dc3545;">Scraping Failed</h2>
             <p><strong>Error:</strong> {str(e)}</p>
             <p><strong>Business URL:</strong> {business_url}</p>
-            <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p><strong>Time:</strong> {dt.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
             
             <h3>Possible Causes:</h3>
             <ul>
