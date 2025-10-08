@@ -370,7 +370,10 @@ class GoogleReviewsScraper:
             
             # Wait for DOM to stabilize after all More button clicks
             print("⏳ Waiting for text expansion to complete...")
-            self._random_delay(3, 5)  # Longer wait for DOM to fully update
+            # Need more time when many buttons were clicked (about 0.15s per expansion minimum)
+            wait_time = min(15, max(8, expanded_count * 0.15))
+            print(f"   (waiting {wait_time:.1f} seconds for {expanded_count} expansions to render)")
+            time.sleep(wait_time)
             
             # Extract review data (will capture report URL for each review)
             reviews = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track)
