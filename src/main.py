@@ -115,7 +115,8 @@ def main():
             if is_initial_run:
                 limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
                 print(f"📊 Initial run detected - will scrape {limit_text} reviews with {ratings_str}-star rating(s)")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
+                print(f"⏭️  Skipping report URL collection (will get them for NEW reviews on future runs)")
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track, skip_report_urls=True)
             else:
                 print(f"📊 Incremental run - will stop at known {ratings_str}-star reviews")
                 all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
@@ -158,20 +159,24 @@ def main():
                     # Add to database with AI analysis
                     db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
                     
-                    # Send notification
-                    print("   📧 Sending email notification...")
-                    success = notifier.send_review_alert(review, ai_analysis)
-                    
-                    if success:
-                        print("   ✓ Email sent successfully")
-                        db.mark_as_notified(
-                            review['reviewer_name'],
-                            review['review_text'],
-                            review['review_date']
-                        )
-                        new_reviews_count += 1
+                    # Send notification (skip on initial run - only email for NEW reviews)
+                    if not is_initial_run:
+                        print("   📧 Sending email notification...")
+                        success = notifier.send_review_alert(review, ai_analysis)
+                        
+                        if success:
+                            print("   ✓ Email sent successfully")
+                            db.mark_as_notified(
+                                review['reviewer_name'],
+                                review['review_text'],
+                                review['review_date']
+                            )
+                            new_reviews_count += 1
+                        else:
+                            print("   ❌ Failed to send email")
                     else:
-                        print("   ❌ Failed to send email")
+                        print("   📧 Email skipped (initial run - baseline data)")
+                        new_reviews_count += 1
             
             # Update dealership last scraped time
             db.update_dealership_last_scraped(dealership_id)

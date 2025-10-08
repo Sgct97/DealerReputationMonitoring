@@ -135,7 +135,7 @@ class GoogleReviewsScraper:
                 continue
         return None
     
-    def scrape_reviews(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
+    def scrape_reviews(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1], skip_report_urls: bool = False) -> List[Dict]:
         """
         Scrape reviews with automatic retry logic and graceful degradation.
         
@@ -147,6 +147,7 @@ class GoogleReviewsScraper:
             scrape_all: If True, scrape ALL reviews regardless of database (for initial run). Default: False
             max_reviews: Maximum reviews to scrape in initial run. 0 = unlimited. Default: 75
             star_ratings_to_track: List of star ratings to track (e.g., [1], [1,2], [1,2,3]). Default: [1]
+            skip_report_urls: If True, skip Pass 2 (don't click report URLs). Useful for initial runs. Default: False
         
         Returns:
             List of dictionaries, each containing review data
@@ -159,7 +160,7 @@ class GoogleReviewsScraper:
                     print(f"\n🔄 Retry attempt {attempt + 1}/{self.max_retries} (waiting {wait_time}s first...)")
                     time.sleep(wait_time)
                 
-                reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track)
+                reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track, skip_report_urls)
                 
                 if reviews:  # Success!
                     return reviews
@@ -175,7 +176,7 @@ class GoogleReviewsScraper:
         
         return []
     
-    def _scrape_reviews_internal(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
+    def _scrape_reviews_internal(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1], skip_report_urls: bool = False) -> List[Dict]:
         """
         Internal scraping logic (called by scrape_reviews with retry wrapper).
         """
@@ -319,6 +320,7 @@ class GoogleReviewsScraper:
             print(f"Scrolled {scroll_count} times, found {len(current_elements)} review elements")
             
             # Expand all "More" buttons to get full review text using robust fallback
+            print("[DIAG] Starting More button expansion phase...")
             print("Expanding reviews to get full text...")
             more_buttons = None
             for selector in SELECTORS['MORE_BUTTON']:
@@ -369,15 +371,18 @@ class GoogleReviewsScraper:
                 print("⚠️ Could not expand reviews - using truncated text")
             
             # Wait for DOM to stabilize after all More button clicks
+            print("[DIAG] More expansion done, waiting for render...")
             print("⏳ Waiting for text expansion to complete...")
             # Need more time when many buttons were clicked (about 0.15s per expansion minimum)
             wait_time = min(15, max(8, expanded_count * 0.15))
             print(f"   (waiting {wait_time:.1f} seconds for {expanded_count} expansions to render)")
             time.sleep(wait_time)
             
-            # Extract review data (will capture report URL for each review)
-            reviews = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track)
+            print("[DIAG] Starting review extraction...")
+            # Extract review data (will capture report URL for each review unless skip_report_urls=True)
+            reviews = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track, skip_report_urls)
             
+            print(f"[DIAG] Extraction complete, got {len(reviews)} reviews")
             print(f"Successfully scraped {len(reviews)} reviews")
             
             return reviews
@@ -391,7 +396,7 @@ class GoogleReviewsScraper:
         finally:
             context.close()
     
-    def _extract_reviews(self, page: Page, context, db_manager=None, dealership_id: int = None, star_ratings_to_track: list = [1]) -> List[Dict]:
+    def _extract_reviews(self, page: Page, context, db_manager=None, dealership_id: int = None, star_ratings_to_track: list = [1], skip_report_urls: bool = False) -> List[Dict]:
         """
         Extract review data from the page using two-pass approach:
         Pass 1: Extract all text data while DOM is stable
@@ -427,9 +432,13 @@ class GoogleReviewsScraper:
         
         # PASS 1: Extract all text data (NO clicking report URLs)
         print("📝 Pass 1: Extracting text data...")
+        print(f"[DIAG] Processing {len(review_elements)} elements...")
         reviews = []
         
         for idx, element in enumerate(review_elements):
+            # Log progress every 50 elements to track where it crashes
+            if idx > 0 and idx % 50 == 0:
+                print(f"[DIAG] Processed {idx}/{len(review_elements)} elements, {len(reviews)} valid reviews so far...")
             try:
                 # Extract reviewer name using robust fallback selectors
                 reviewer_name = self._try_selectors(element, SELECTORS['REVIEWER_NAME'])
@@ -530,35 +539,44 @@ class GoogleReviewsScraper:
             reviews_needing_urls = reviews
         
         # PASS 2: Add report URLs (ONLY for new reviews - OPTIMIZED!)
-        print(f"\n🔗 Pass 2: Getting report URLs for {len(reviews_needing_urls)} NEW reviews...")
-        
-        for idx, review in enumerate(reviews_needing_urls):
-            try:
-                print(f"\n  [{idx+1}/{len(reviews_needing_urls)}] Processing {review['reviewer_name']}...")
-                
-                element = review['element']
-                reviewer_name = review['reviewer_name']
-                
-                # Note: We skip element validation because is_visible() can hang on stale elements
-                # Instead, we'll catch exceptions in _get_report_url_by_clicking
-                print(f"      Calling _get_report_url_by_clicking...")
-                # Get direct report URL by clicking through the UI
-                review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
-                review['review_url'] = review_url
-                
-                # Remove element reference (don't need it anymore)
-                del review['element']
-                
-                print(f"      ✓ Got report URL for {reviewer_name}")
-                
-            except Exception as e:
-                print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
-                # Use fallback URL
-                review['review_url'] = page.url
+        # Skip Pass 2 if requested (e.g., for initial runs building baseline)
+        if skip_report_urls:
+            print(f"\n⏭️  Pass 2: SKIPPED (skip_report_urls=True)")
+            print(f"   Note: Report URLs will be collected during incremental runs for NEW reviews only")
+            # Clean up element references
+            for review in reviews:
                 if 'element' in review:
                     del review['element']
-        
-        print(f"\n✓ Pass 2 complete: Added report URLs")
+        else:
+            print(f"\n🔗 Pass 2: Getting report URLs for {len(reviews_needing_urls)} NEW reviews...")
+            
+            for idx, review in enumerate(reviews_needing_urls):
+                try:
+                    print(f"\n  [{idx+1}/{len(reviews_needing_urls)}] Processing {review['reviewer_name']}...")
+                    
+                    element = review['element']
+                    reviewer_name = review['reviewer_name']
+                    
+                    # Note: We skip element validation because is_visible() can hang on stale elements
+                    # Instead, we'll catch exceptions in _get_report_url_by_clicking
+                    print(f"      Calling _get_report_url_by_clicking...")
+                    # Get direct report URL by clicking through the UI
+                    review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                    review['review_url'] = review_url
+                    
+                    # Remove element reference (don't need it anymore)
+                    del review['element']
+                    
+                    print(f"      ✓ Got report URL for {reviewer_name}")
+                    
+                except Exception as e:
+                    print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
+                    # Use fallback URL
+                    review['review_url'] = page.url
+                    if 'element' in review:
+                        del review['element']
+            
+            print(f"\n✓ Pass 2 complete: Added report URLs")
         
         return reviews
     
