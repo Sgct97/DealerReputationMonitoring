@@ -66,6 +66,19 @@ def main():
     print("\n📊 Initializing database...")
     db = DatabaseManager(database_path)
     
+    # Extract dealership name from URL or use default
+    dealership_name = "Test Dealership"
+    try:
+        url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
+        if url_parts:
+            dealership_name = url_parts.split('@')[0].replace('+', ' ')
+    except:
+        pass
+    
+    # Add or get dealership
+    dealership_id = db.add_dealership(dealership_name, business_url)
+    print(f"📍 Monitoring: {dealership_name} (ID: {dealership_id})")
+    
     print("🤖 Initializing AI analyzer (GPT-5)...")
     analyzer = ReviewAnalyzer(openai_api_key)
     
@@ -88,10 +101,10 @@ def main():
             if is_initial_run:
                 limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
                 print(f"📊 Initial run detected - will scrape {limit_text} {ratings_str}-star reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
             else:
                 print(f"📊 Incremental run - will stop at known {ratings_str}-star reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
             
             if not all_reviews:
                 print("⚠️  No reviews found. This could mean:")
@@ -114,7 +127,8 @@ def main():
                 if not db.review_exists(
                     review['reviewer_name'],
                     review['review_text'],
-                    review['review_date']
+                    review['review_date'],
+                    dealership_id
                 ):
                     print(f"\n🆕 New 1-star review detected!")
                     print(f"   Reviewer: {review['reviewer_name']}")
@@ -123,7 +137,7 @@ def main():
                     print(f"   Text: {review['review_text'][:100]}..." if len(review['review_text']) > 100 else f"   Text: {review['review_text']}")
                     
                     # Add to database
-                    db.add_review(review)
+                    db.add_review(review, dealership_id=dealership_id)
                     print(f"   ✓ Saved to database")
                     
                     # Analyze with AI

@@ -115,10 +115,10 @@ def main():
             if is_initial_run:
                 limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
                 print(f"📊 Initial run detected - will scrape {limit_text} reviews with {ratings_str}-star rating(s)")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track)
             else:
                 print(f"📊 Incremental run - will stop at known {ratings_str}-star reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
+                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
             
             if not all_reviews:
                 print("⚠️  No reviews found. This could mean:")

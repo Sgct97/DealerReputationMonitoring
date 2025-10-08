@@ -135,13 +135,14 @@ class GoogleReviewsScraper:
                 continue
         return None
     
-    def scrape_reviews(self, business_url: str, db_manager=None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
+    def scrape_reviews(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
         """
         Scrape reviews with automatic retry logic and graceful degradation.
         
         Args:
             business_url: URL of the Google Business Profile
             db_manager: Optional DatabaseManager to check for existing reviews
+            dealership_id: Optional dealership ID for duplicate checking (used with db_manager)
             stop_at_seen: Stop scrolling after finding this many consecutive seen reviews (default: 3)
             scrape_all: If True, scrape ALL reviews regardless of database (for initial run). Default: False
             max_reviews: Maximum reviews to scrape in initial run. 0 = unlimited. Default: 75
@@ -158,7 +159,7 @@ class GoogleReviewsScraper:
                     print(f"\n🔄 Retry attempt {attempt + 1}/{self.max_retries} (waiting {wait_time}s first...)")
                     time.sleep(wait_time)
                 
-                reviews = self._scrape_reviews_internal(business_url, db_manager, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track)
+                reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track)
                 
                 if reviews:  # Success!
                     return reviews
@@ -174,7 +175,7 @@ class GoogleReviewsScraper:
         
         return []
     
-    def _scrape_reviews_internal(self, business_url: str, db_manager=None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
+    def _scrape_reviews_internal(self, business_url: str, db_manager=None, dealership_id: int = None, stop_at_seen: int = 3, scrape_all: bool = False, max_reviews: int = 75, star_ratings_to_track: list = [1]) -> List[Dict]:
         """
         Internal scraping logic (called by scrape_reviews with retry wrapper).
         """
@@ -337,20 +338,33 @@ class GoogleReviewsScraper:
             
             expanded_count = 0
             failed_count = 0
+            not_visible_count = 0
             for idx, button in enumerate(more_buttons):
                 try:
+                    # Scroll button into view before checking visibility/clicking
+                    button.scroll_into_view_if_needed()
+                    self._random_delay(0.1, 0.2)  # Small delay after scroll
+                    
                     if button.is_visible():
                         button.click()
                         expanded_count += 1
                         self._random_delay(0.2, 0.5)
+                    else:
+                        not_visible_count += 1
                 except Exception as e:
                     # Some buttons might not be clickable - log for debugging
                     failed_count += 1
-                    if failed_count <= 3:  # Only show first 3 failures
-                        print(f"  ⚠️ More button {idx+1} failed: {type(e).__name__}")
+                    if failed_count <= 5:  # Show first 5 failures for debugging
+                        print(f"  ⚠️ More button {idx+1} failed: {type(e).__name__}: {str(e)}")
+            
+            print(f"📊 More button expansion summary:")
+            print(f"   - Total buttons found: {len(more_buttons)}")
+            print(f"   - Successfully clicked: {expanded_count}")
+            print(f"   - Not visible: {not_visible_count}")
+            print(f"   - Failed to click: {failed_count}")
             
             if expanded_count > 0:
-                print(f"✓ Expanded {expanded_count}/{len(more_buttons)} reviews ({failed_count} failed)")
+                print(f"✓ Expanded {expanded_count}/{len(more_buttons)} reviews")
             else:
                 print("⚠️ Could not expand reviews - using truncated text")
             
@@ -359,7 +373,7 @@ class GoogleReviewsScraper:
             self._random_delay(3, 5)  # Longer wait for DOM to fully update
             
             # Extract review data (will capture report URL for each review)
-            reviews = self._extract_reviews(page, context)
+            reviews = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track)
             
             print(f"Successfully scraped {len(reviews)} reviews")
             
@@ -374,15 +388,19 @@ class GoogleReviewsScraper:
         finally:
             context.close()
     
-    def _extract_reviews(self, page: Page, context) -> List[Dict]:
+    def _extract_reviews(self, page: Page, context, db_manager=None, dealership_id: int = None, star_ratings_to_track: list = [1]) -> List[Dict]:
         """
         Extract review data from the page using two-pass approach:
         Pass 1: Extract all text data while DOM is stable
-        Pass 2: Add report URLs by clicking (after text is safely captured)
+        Pass 1.5: Check which reviews already exist in database (OPTIMIZATION)
+        Pass 2: Add report URLs by clicking (ONLY for new reviews)
         
         Args:
             page: Playwright page object
             context: Playwright context object
+            db_manager: Optional DatabaseManager to check for existing reviews
+            dealership_id: Optional dealership ID for duplicate checking
+            star_ratings_to_track: List of star ratings to track (for filtering before duplication check)
         
         Returns:
             List of review dictionaries
@@ -437,9 +455,9 @@ class GoogleReviewsScraper:
                 if reviewer_name and review_text:
                     # Log text length to verify More button expansion worked
                     text_len = len(review_text)
-                    status = "✓" if text_len > 200 else "⚠️"
-                    if text_len < 200 or reviewer_name == "Mudiaga Ofuoku":
-                        print(f"  {status} {reviewer_name}: {text_len} chars")
+                    # Log ALL reviews with short text (likely truncated)
+                    if text_len < 300:
+                        print(f"  ⚠️ SHORT TEXT: {reviewer_name}: {text_len} chars")
                     
                     review = {
                         'reviewer_name': reviewer_name,
@@ -465,25 +483,61 @@ class GoogleReviewsScraper:
         
         print(f"✓ Pass 1 complete: Extracted {len(reviews)} reviews")
         
-        # PASS 2: Add report URLs (NOW we can click safely)
-        print(f"🔗 Pass 2: Getting report URLs for {len(reviews)} reviews...")
+        # FILTER: Only keep reviews with tracked star ratings BEFORE checking duplicates
+        # This prevents wasting time clicking report URLs for ratings we don't track
+        if star_ratings_to_track:
+            pre_filter_count = len(reviews)
+            reviews = [r for r in reviews if r['star_rating'] in star_ratings_to_track]
+            filtered_count = pre_filter_count - len(reviews)
+            if filtered_count > 0:
+                ratings_str = ','.join(map(str, sorted(star_ratings_to_track)))
+                print(f"🔽 Filtered out {filtered_count} reviews with ratings not in [{ratings_str}]")
         
-        for idx, review in enumerate(reviews):
+        # PASS 1.5: Check which reviews already exist in database (OPTIMIZATION)
+        # This allows us to skip clicking report URLs for reviews we already have
+        reviews_needing_urls = []
+        
+        if db_manager and dealership_id:
+            print(f"\n🔍 Pass 1.5: Checking for duplicates in database...")
+            existing_count = 0
+            new_count = 0
+            
+            for review in reviews:
+                if db_manager.review_exists(
+                    review['reviewer_name'],
+                    review['review_text'],
+                    review['review_date'],
+                    dealership_id
+                ):
+                    # Review already exists - skip clicking report URL
+                    existing_count += 1
+                    # Still include in results but mark as existing (no need to click)
+                    review['review_url'] = None  # Will use business URL as fallback in main.py
+                    del review['element']  # Don't need element reference
+                else:
+                    # New review - needs report URL
+                    new_count += 1
+                    reviews_needing_urls.append(review)
+            
+            print(f"✓ Found {existing_count} existing reviews (skipping URL clicks)")
+            print(f"✓ Found {new_count} new reviews (will get report URLs)")
+        else:
+            # No db_manager or dealership_id - get URLs for all reviews (backward compatible)
+            print(f"\n⚠️  No database checking - will get report URLs for all reviews")
+            reviews_needing_urls = reviews
+        
+        # PASS 2: Add report URLs (ONLY for new reviews - OPTIMIZED!)
+        print(f"\n🔗 Pass 2: Getting report URLs for {len(reviews_needing_urls)} NEW reviews...")
+        
+        for idx, review in enumerate(reviews_needing_urls):
             try:
-                print(f"\n  [{idx+1}/{len(reviews)}] Processing {review['reviewer_name']}...")
+                print(f"\n  [{idx+1}/{len(reviews_needing_urls)}] Processing {review['reviewer_name']}...")
                 
                 element = review['element']
                 reviewer_name = review['reviewer_name']
                 
-                print(f"      Checking if element is still valid...")
-                try:
-                    # Test if element is still attached to DOM
-                    is_visible = element.is_visible()
-                    print(f"      ✓ Element is valid and visible: {is_visible}")
-                except Exception as elem_error:
-                    print(f"      ❌ Element is STALE: {elem_error}")
-                    raise
-                
+                # Note: We skip element validation because is_visible() can hang on stale elements
+                # Instead, we'll catch exceptions in _get_report_url_by_clicking
                 print(f"      Calling _get_report_url_by_clicking...")
                 # Get direct report URL by clicking through the UI
                 review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)

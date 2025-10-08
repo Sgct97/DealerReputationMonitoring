@@ -129,12 +129,15 @@ class DatabaseManager:
         Args:
             reviewer_name: Name of the reviewer
             review_text: Text content of the review
-            review_date: Date the review was posted
+            review_date: Date the review was posted (NOT used in hash - Google uses relative dates that change)
         
         Returns:
             SHA256 hash string
         """
-        content = f"{reviewer_name}|{review_text}|{review_date}"
+        # NOTE: We don't include review_date because Google returns relative dates like
+        # "7 months ago" which change to "8 months ago" the next day, causing false duplicates.
+        # Reviewer name + text is unique enough.
+        content = f"{reviewer_name}|{review_text}"
         return hashlib.sha256(content.encode()).hexdigest()
     
     def review_exists(self, reviewer_name: str, review_text: str, review_date: str, dealership_id: int = None) -> bool:
