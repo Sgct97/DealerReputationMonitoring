@@ -7,7 +7,8 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies (force reinstall openai to avoid conflicts)
+RUN pip uninstall -y openai || true
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the entire application
