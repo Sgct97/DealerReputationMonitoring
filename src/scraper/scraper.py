@@ -79,7 +79,7 @@ class GoogleReviewsScraper:
         
         # Configure browser launch options
         launch_options = {
-            'headless': False,  # Set to False to see the browser
+            'headless': True,  # Must be True for Docker/server environments
             'args': [
                 '--disable-blink-features=AutomationControlled',
                 '--disable-dev-shm-usage',
