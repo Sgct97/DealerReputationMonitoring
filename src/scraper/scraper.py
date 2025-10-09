@@ -224,14 +224,45 @@ class GoogleReviewsScraper:
             reviews_loaded = False
             for selector in SELECTORS['REVIEW_CONTAINER']:
                 try:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}]   Trying selector: {selector}")
                     page.wait_for_selector(selector, timeout=10000)
                     reviews_loaded = True
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Reviews loaded")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Reviews loaded using: {selector}")
                     break
-                except:
+                except Exception as selector_error:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}]   ✗ Failed: {selector_error}")
                     continue
             
             if not reviews_loaded:
+                # Comprehensive diagnostics before failing
+                print(f"\n{'='*60}")
+                print(f"❌ FAILURE DIAGNOSTICS")
+                print(f"{'='*60}")
+                print(f"Current URL: {page.url}")
+                print(f"Page title: {page.title()}")
+                
+                # Take screenshot for debugging
+                try:
+                    screenshot_path = 'data/failure_screenshot.png'
+                    page.screenshot(path=screenshot_path)
+                    print(f"Screenshot saved: {screenshot_path}")
+                except Exception as screenshot_error:
+                    print(f"Could not save screenshot: {screenshot_error}")
+                
+                # Check for error messages on page
+                try:
+                    error_texts = page.locator('text=/error|blocked|captcha|unusual traffic/i').all()
+                    if error_texts:
+                        print(f"Error messages found on page: {len(error_texts)}")
+                        for i, err in enumerate(error_texts[:3]):  # Show first 3
+                            try:
+                                print(f"  - {err.text_content()[:100]}")
+                            except:
+                                pass
+                except:
+                    pass
+                
+                print(f"{'='*60}\n")
                 raise Exception("Reviews did not load - all selectors failed")
             
             # Click the sort button
@@ -511,10 +542,27 @@ class GoogleReviewsScraper:
         
         if db_manager and dealership_id:
             print(f"\n🔍 Pass 1.5: Checking for duplicates in database...")
+            
+            # First, identify which star ratings are NEW for this dealership
+            # This prevents clicking report URLs for reviews when user adds new ratings to track
+            new_star_ratings_for_dealership = []
+            for rating in star_ratings_to_track:
+                if not db_manager.has_reviews_with_rating(dealership_id, rating):
+                    new_star_ratings_for_dealership.append(rating)
+            
+            if new_star_ratings_for_dealership:
+                new_ratings_str = ','.join(map(str, new_star_ratings_for_dealership))
+                print(f"   📌 First time seeing {new_ratings_str}-star reviews for this dealership")
+                print(f"   → Skipping report URL collection for all {new_ratings_str}-star reviews (baseline data)")
+            
             existing_count = 0
             new_count = 0
+            skipped_new_rating_count = 0
             
             for review in reviews:
+                # Check if this review's star rating is new to this dealership
+                is_new_rating = review['star_rating'] in new_star_ratings_for_dealership
+                
                 if db_manager.review_exists(
                     review['reviewer_name'],
                     review['review_text'],
@@ -526,12 +574,19 @@ class GoogleReviewsScraper:
                     # Still include in results but mark as existing (no need to click)
                     review['review_url'] = None  # Will use business URL as fallback in main.py
                     del review['element']  # Don't need element reference
+                elif is_new_rating:
+                    # New star rating being tracked - treat as baseline (skip report URL)
+                    skipped_new_rating_count += 1
+                    review['review_url'] = None  # Will use business URL as fallback in main.py
+                    del review['element']  # Don't need element reference
                 else:
-                    # New review - needs report URL
+                    # New review with existing star rating - needs report URL
                     new_count += 1
                     reviews_needing_urls.append(review)
             
             print(f"✓ Found {existing_count} existing reviews (skipping URL clicks)")
+            if skipped_new_rating_count > 0:
+                print(f"✓ Found {skipped_new_rating_count} reviews with new star ratings (skipping URL clicks - baseline)")
             print(f"✓ Found {new_count} new reviews (will get report URLs)")
         else:
             # No db_manager or dealership_id - get URLs for all reviews (backward compatible)

@@ -326,3 +326,28 @@ class DatabaseManager:
             'one_star_reviews': one_star,
             'notified_count': notified
         }
+    
+    def has_reviews_with_rating(self, dealership_id: int, star_rating: int) -> bool:
+        """
+        Check if dealership has ANY reviews with the specified star rating.
+        Used to determine if a star rating is being tracked for the first time.
+        
+        Args:
+            dealership_id: The dealership ID to check
+            star_rating: The star rating to check (e.g., 1, 2, 3)
+        
+        Returns:
+            True if at least one review exists, False otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM reviews 
+            WHERE dealership_id = ? AND star_rating = ?
+        """, (dealership_id, star_rating))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count > 0
