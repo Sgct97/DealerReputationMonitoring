@@ -168,9 +168,13 @@ def main():
                             new_star_ratings.append(rating)
                     
                     if new_star_ratings:
-                        new_ratings_str = ','.join(map(str, new_star_ratings))
-                        print(f"📌 First time tracking {new_ratings_str}-star reviews for this dealership")
-                        print(f"   → All {new_ratings_str}-star reviews will be treated as baseline (no AI/emails)")
+                        # Only show message if we actually found reviews with these new ratings
+                        found_new_ratings = [r['star_rating'] for r in tracked_reviews if r['star_rating'] in new_star_ratings]
+                        if found_new_ratings:
+                            unique_found = sorted(set(found_new_ratings))
+                            new_ratings_str = ','.join(map(str, unique_found))
+                            print(f"📌 First time tracking {new_ratings_str}-star reviews for this dealership")
+                            print(f"   → All {new_ratings_str}-star reviews will be treated as baseline (no AI/emails)")
                 
                 # Process each tracked review
                 new_reviews_count = 0

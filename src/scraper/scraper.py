@@ -551,9 +551,13 @@ class GoogleReviewsScraper:
                     new_star_ratings_for_dealership.append(rating)
             
             if new_star_ratings_for_dealership:
-                new_ratings_str = ','.join(map(str, new_star_ratings_for_dealership))
-                print(f"   📌 First time seeing {new_ratings_str}-star reviews for this dealership")
-                print(f"   → Skipping report URL collection for all {new_ratings_str}-star reviews (baseline data)")
+                # Only show message if we actually found reviews with these new ratings
+                found_new_ratings = [r['star_rating'] for r in reviews if r['star_rating'] in new_star_ratings_for_dealership]
+                if found_new_ratings:
+                    unique_found = sorted(set(found_new_ratings))
+                    new_ratings_str = ','.join(map(str, unique_found))
+                    print(f"   📌 First time seeing {new_ratings_str}-star reviews for this dealership")
+                    print(f"   → Skipping report URL collection for all {new_ratings_str}-star reviews (baseline data)")
             
             existing_count = 0
             new_count = 0
