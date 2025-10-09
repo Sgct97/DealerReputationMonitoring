@@ -1,5 +1,5 @@
 # Use the official Playwright Python image with Chromium pre-installed
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
 
 # Set working directory
 WORKDIR /app
