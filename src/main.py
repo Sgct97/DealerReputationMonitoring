@@ -6,6 +6,7 @@ Coordinates scraping, analysis, and notification for new 1-star reviews.
 import os
 import sys
 import time
+import schedule
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -326,4 +327,30 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Load environment variables
+    load_dotenv()
+    
+    # Check if running as a background worker with scheduling
+    run_interval_hours = os.getenv('RUN_INTERVAL_HOURS')
+    
+    if run_interval_hours:
+        # Background Worker mode: run on a schedule
+        interval = int(run_interval_hours)
+        print(f"🔄 Background Worker mode: Running every {interval} hour(s)")
+        
+        # Schedule the job
+        schedule.every(interval).hours.do(main)
+        
+        # Run immediately on startup
+        print("🚀 Running initial scrape...")
+        main()
+        
+        # Keep running forever, checking schedule
+        print(f"⏰ Next run scheduled in {interval} hour(s)")
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
+    else:
+        # Cron Job mode: run once and exit
+        print("⚡ Cron Job mode: Running once")
+        main()

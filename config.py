@@ -12,12 +12,9 @@ GOOGLE_BUSINESS_URL=https://www.google.com/maps/place/YOUR_BUSINESS_HERE
 # Get this from: https://platform.openai.com/api-keys
 OPENAI_API_KEY=sk-your-api-key-here
 
-# SendGrid API Key
-# Get this from: https://app.sendgrid.com/settings/api_keys
-SENDGRID_API_KEY=SG.your-sendgrid-api-key-here
-
-# Email Configuration
-FROM_EMAIL=alerts@yourdomain.com
+# Gmail Configuration
+GMAIL_ADDRESS=your-email@gmail.com
+GMAIL_APP_PASSWORD=your-app-password-here
 TO_EMAIL=client@example.com
 
 # Residential Proxy Configuration (HIGHLY RECOMMENDED)
@@ -28,6 +25,11 @@ PROXY_PASSWORD=your_proxy_password
 
 # Database Path (default is fine for most cases)
 DATABASE_PATH=./data/reviews.db
+
+# Run Interval (for Background Worker mode only)
+# Set to run every X hours (1 = every hour, 4 = every 4 hours, etc.)
+# Leave blank or omit for Cron Job mode
+RUN_INTERVAL_HOURS=4
 """
 
 if __name__ == "__main__":
