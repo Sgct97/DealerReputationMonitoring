@@ -287,9 +287,12 @@ class DatabaseManager:
         
         return reviews
     
-    def get_stats(self) -> Dict:
+    def get_stats(self, dealership_id: int = None) -> Dict:
         """
         Get statistics about the stored reviews.
+        
+        Args:
+            dealership_id: Optional dealership ID to filter stats. If None, returns global stats.
         
         Returns:
             Dictionary with stats (total_reviews, one_star_reviews, notified_count)
@@ -297,14 +300,24 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT COUNT(*) FROM reviews")
-        total = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM reviews WHERE star_rating = 1")
-        one_star = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM reviews WHERE notified = 1")
-        notified = cursor.fetchone()[0]
+        if dealership_id:
+            cursor.execute("SELECT COUNT(*) FROM reviews WHERE dealership_id = ?", (dealership_id,))
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM reviews WHERE dealership_id = ? AND star_rating = 1", (dealership_id,))
+            one_star = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM reviews WHERE dealership_id = ? AND notified = 1", (dealership_id,))
+            notified = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT COUNT(*) FROM reviews")
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM reviews WHERE star_rating = 1")
+            one_star = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM reviews WHERE notified = 1")
+            notified = cursor.fetchone()[0]
         
         conn.close()
         

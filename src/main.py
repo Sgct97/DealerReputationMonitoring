@@ -24,13 +24,17 @@ def main():
     load_dotenv()
     
     # Get configuration from environment
-    business_url = os.getenv('GOOGLE_BUSINESS_URL')
+    business_urls_str = os.getenv('GOOGLE_BUSINESS_URL')
     openai_api_key = os.getenv('OPENAI_API_KEY')
     gmail_address = os.getenv('GMAIL_ADDRESS')
     gmail_app_password = os.getenv('GMAIL_APP_PASSWORD')
     to_email = os.getenv('TO_EMAIL')
     database_path = os.getenv('DATABASE_PATH', './data/reviews.db')
     initial_scrape_limit = int(os.getenv('INITIAL_SCRAPE_LIMIT', '75'))  # 0 = unlimited
+    
+    # Parse multiple URLs (pipe-separated: url1|url2|url3)
+    # Use pipe (|) instead of comma since URLs contain commas in coordinates
+    business_urls = [url.strip() for url in business_urls_str.split('|')] if business_urls_str else []
     
     # Parse star ratings to track (comma-separated)
     star_ratings_str = os.getenv('STAR_RATINGS_TO_TRACK', '1')
@@ -43,7 +47,7 @@ def main():
     
     # Validate required configuration
     required_vars = {
-        'GOOGLE_BUSINESS_URL': business_url,
+        'GOOGLE_BUSINESS_URL': business_urls_str,
         'OPENAI_API_KEY': openai_api_key,
         'GMAIL_ADDRESS': gmail_address,
         'GMAIL_APP_PASSWORD': gmail_app_password,
@@ -55,6 +59,10 @@ def main():
     if missing_vars:
         print(f"❌ Error: Missing required environment variables: {', '.join(missing_vars)}")
         print("Please check your .env file.")
+        sys.exit(1)
+    
+    if not business_urls:
+        print("❌ Error: No business URLs found in GOOGLE_BUSINESS_URL")
         sys.exit(1)
     
     # Prepare proxy config
@@ -76,24 +84,11 @@ def main():
     print("=" * 60)
     print("🚀 Starting Dealer Reputation Keeper")
     print("=" * 60)
+    print(f"📍 Monitoring {len(business_urls)} dealership(s)")
     
     # Initialize components
     print("\n📊 Initializing database...")
     db = DatabaseManager(database_path)
-    
-    # Extract dealership name from URL or use default
-    dealership_name = "Dealership"  # Default
-    try:
-        # Try to extract name from URL (e.g., "Crown+Honda" → "Crown Honda")
-        url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
-        if url_parts:
-            dealership_name = url_parts.split('@')[0].replace('+', ' ')
-    except:
-        pass
-    
-    # Add or get dealership
-    dealership_id = db.add_dealership(dealership_name, business_url)
-    print(f"📍 Monitoring: {dealership_name} (ID: {dealership_id})")
     
     print("🤖 Initializing AI analyzer...")
     analyzer = ReviewAnalyzer(openai_api_key)
@@ -101,94 +96,120 @@ def main():
     print("📧 Initializing email notifier...")
     notifier = EmailNotifier(gmail_address, gmail_app_password, to_email)
     
-    # Start scraping
-    print(f"\n🔍 Scraping reviews from: {business_url}")
+    # Track totals across all dealerships
+    total_new_reviews = 0
+    total_tracked_reviews = 0
     
     try:
         import subprocess
         with GoogleReviewsScraper(proxy_config) as scraper:
-            # Auto-detect if this is the initial run (empty database)
-            stats = db.get_stats()
-            is_initial_run = stats['total_reviews'] == 0
-            
-            ratings_str = ','.join(map(str, star_ratings_to_track))
-            
-            if is_initial_run:
-                limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
-                print(f"📊 Initial run detected - will scrape {limit_text} reviews with {ratings_str}-star rating(s)")
-                print(f"⏭️  Skipping report URL collection (will get them for NEW reviews on future runs)")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track, skip_report_urls=True)
-            else:
-                print(f"📊 Incremental run - will stop at known {ratings_str}-star reviews")
-                all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
-            
-            if not all_reviews:
-                print("⚠️  No reviews found. This could mean:")
-                print("   - The page structure has changed (selectors need updating)")
-                print("   - The business has no reviews yet")
-                print("   - Access was blocked")
-                return
-            
-            print(f"✓ Found {len(all_reviews)} total reviews")
-            
-            # Filter for tracked star ratings
-            tracked_reviews = scraper.filter_reviews_by_rating(all_reviews, star_ratings_to_track)
-            print(f"✓ Found {len(tracked_reviews)} review(s) with {ratings_str}-star rating(s)")
-            
-            # Process each tracked review
-            new_reviews_count = 0
-            
-            for review in tracked_reviews:
+            # Process each dealership
+            for idx, business_url in enumerate(business_urls, 1):
+                print(f"\n{'=' * 60}")
+                print(f"🏢 Dealership {idx}/{len(business_urls)}")
+                print(f"{'=' * 60}")
+                
+                # Extract dealership name from URL or use default
+                dealership_name = f"Dealership {idx}"  # Default
                 try:
-                    # Check if this is a new review for this dealership
-                    if not db.review_exists(
-                        review['reviewer_name'],
-                        review['review_text'],
-                        review['review_date'],
-                        dealership_id
-                    ):
-                        print(f"\n🆕 New {review['star_rating']}-star review detected from: {review['reviewer_name']}")
-                        
-                        # Only analyze with AI on incremental runs (skip on initial baseline)
-                        ai_analysis = None
-                        if not is_initial_run:
-                            print("   🤖 Analyzing with AI...")
-                            ai_analysis = analyzer.analyze_review(
-                                review['review_text'],
-                                review['reviewer_name']
-                            )
-                            print(f"   ✓ Recommended category: {ai_analysis['category']}")
-                        else:
-                            print("   🤖 AI analysis skipped (initial run - baseline data)")
-                        
-                        # Add to database with AI analysis (if any)
-                        db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
-                        
-                        # Send notification (skip on initial run - only email for NEW reviews)
-                        if not is_initial_run:
-                            print("   📧 Sending email notification...")
-                            success = notifier.send_review_alert(review, ai_analysis)
+                    # Try to extract name from URL (e.g., "Crown+Honda" → "Crown Honda")
+                    url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
+                    if url_parts:
+                        dealership_name = url_parts.split('@')[0].replace('+', ' ')
+                except:
+                    pass
+                
+                # Add or get dealership
+                dealership_id = db.add_dealership(dealership_name, business_url)
+                print(f"📍 {dealership_name} (ID: {dealership_id})")
+                print(f"🔍 URL: {business_url}")
+                
+                # Auto-detect if this is the initial run for THIS dealership
+                dealership_stats = db.get_stats(dealership_id)
+                is_initial_run = dealership_stats['total_reviews'] == 0
+                
+                ratings_str = ','.join(map(str, star_ratings_to_track))
+                
+                if is_initial_run:
+                    limit_text = "UNLIMITED" if initial_scrape_limit == 0 else f"up to {initial_scrape_limit}"
+                    print(f"📊 Initial run detected - will scrape {limit_text} reviews with {ratings_str}-star rating(s)")
+                    print(f"⏭️  Skipping report URL collection (will get them for NEW reviews on future runs)")
+                    all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, scrape_all=True, max_reviews=initial_scrape_limit, star_ratings_to_track=star_ratings_to_track, skip_report_urls=True)
+                else:
+                    print(f"📊 Incremental run - will scrape all {ratings_str}-star reviews")
+                    all_reviews = scraper.scrape_reviews(business_url, db_manager=db, dealership_id=dealership_id, stop_at_seen=3, star_ratings_to_track=star_ratings_to_track)
+                
+                if not all_reviews:
+                    print("⚠️  No reviews found. This could mean:")
+                    print("   - The page structure has changed (selectors need updating)")
+                    print("   - The business has no reviews yet")
+                    print("   - Access was blocked")
+                    continue  # Skip to next dealership
+                
+                print(f"✓ Found {len(all_reviews)} total reviews")
+                
+                # Filter for tracked star ratings
+                tracked_reviews = scraper.filter_reviews_by_rating(all_reviews, star_ratings_to_track)
+                print(f"✓ Found {len(tracked_reviews)} review(s) with {ratings_str}-star rating(s)")
+                
+                # Process each tracked review
+                new_reviews_count = 0
+                
+                for review in tracked_reviews:
+                    try:
+                        # Check if this is a new review for this dealership
+                        if not db.review_exists(
+                            review['reviewer_name'],
+                            review['review_text'],
+                            review['review_date'],
+                            dealership_id
+                        ):
+                            print(f"\n🆕 New {review['star_rating']}-star review detected from: {review['reviewer_name']}")
                             
-                            if success:
-                                print("   ✓ Email sent successfully")
-                                db.mark_as_notified(
-                                    review['reviewer_name'],
+                            # Only analyze with AI on incremental runs (skip on initial baseline)
+                            ai_analysis = None
+                            if not is_initial_run:
+                                print("   🤖 Analyzing with AI...")
+                                ai_analysis = analyzer.analyze_review(
                                     review['review_text'],
-                                    review['review_date']
+                                    review['reviewer_name']
                                 )
-                                new_reviews_count += 1
+                                print(f"   ✓ Recommended category: {ai_analysis['category']}")
                             else:
-                                print("   ❌ Failed to send email")
-                        else:
-                            print("   📧 Email skipped (initial run - baseline data)")
-                            new_reviews_count += 1
-                except Exception as review_error:
-                    print(f"   ❌ Error processing review from {review.get('reviewer_name', 'Unknown')}: {review_error}")
-                    print(f"   → Skipping this review and continuing with next one...")
-                    continue
-            
-            # Update dealership last scraped time
-            db.update_dealership_last_scraped(dealership_id)
+                                print("   🤖 AI analysis skipped (initial run - baseline data)")
+                            
+                            # Add to database with AI analysis (if any)
+                            db.add_review(review, dealership_id=dealership_id, ai_analysis=ai_analysis)
+                            
+                            # Send notification (skip on initial run - only email for NEW reviews)
+                            if not is_initial_run:
+                                print("   📧 Sending email notification...")
+                                success = notifier.send_review_alert(review, ai_analysis)
+                                
+                                if success:
+                                    print("   ✓ Email sent successfully")
+                                    db.mark_as_notified(
+                                        review['reviewer_name'],
+                                        review['review_text'],
+                                        review['review_date']
+                                    )
+                                    new_reviews_count += 1
+                                else:
+                                    print("   ❌ Failed to send email")
+                            else:
+                                print("   📧 Email skipped (initial run - baseline data)")
+                                new_reviews_count += 1
+                    except Exception as review_error:
+                        print(f"   ❌ Error processing review from {review.get('reviewer_name', 'Unknown')}: {review_error}")
+                        print(f"   → Skipping this review and continuing with next one...")
+                        continue
+                
+                # Update dealership last scraped time
+                db.update_dealership_last_scraped(dealership_id)
+                
+                # Update totals
+                total_new_reviews += new_reviews_count
+                total_tracked_reviews += len(tracked_reviews)
         
         # Clean up any zombie Chromium processes after scraper closes
         try:
@@ -201,15 +222,17 @@ def main():
         print("\n" + "=" * 60)
         print("📈 Summary")
         print("=" * 60)
+        print(f"🏢 Dealerships processed: {len(business_urls)}")
         
-        if new_reviews_count > 0:
-            print(f"✓ {new_reviews_count} new {ratings_str}-star review(s) detected and reported")
+        ratings_str = ','.join(map(str, star_ratings_to_track))
+        if total_new_reviews > 0:
+            print(f"✓ {total_new_reviews} new {ratings_str}-star review(s) detected and reported")
         else:
             print(f"✓ No new {ratings_str}-star reviews detected")
         
-        stats = db.get_stats()
+        stats = db.get_stats()  # Get global stats across all dealerships
         print(f"📊 Total reviews tracked: {stats['total_reviews']}")
-        print(f"⭐ Reviews with tracked ratings ({ratings_str}-star): {stats['one_star_reviews']}")
+        print(f"⭐ Reviews with tracked ratings ({ratings_str}-star): {total_tracked_reviews}")
         print(f"📧 Total notifications sent: {stats['notified_count']}")
     
     except Exception as e:
