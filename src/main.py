@@ -100,26 +100,26 @@ def main():
     # Track totals across all dealerships
     total_new_reviews = 0
     total_tracked_reviews = 0
+    total_emails_sent = 0  # Track emails actually sent in this run
     
     try:
         import subprocess
         with GoogleReviewsScraper(proxy_config) as scraper:
             # Process each dealership
             for idx, business_url in enumerate(business_urls, 1):
+                print(f"\n{'=' * 60}")
+                print(f"🏢 Dealership {idx}/{len(business_urls)}")
+                print(f"{'=' * 60}")
+                
+                # Extract dealership name from URL or use default
+                dealership_name = f"Dealership {idx}"  # Default
                 try:
-                    print(f"\n{'=' * 60}")
-                    print(f"🏢 Dealership {idx}/{len(business_urls)}")
-                    print(f"{'=' * 60}")
-                    
-                    # Extract dealership name from URL or use default
-                    dealership_name = f"Dealership {idx}"  # Default
-                    try:
-                        # Try to extract name from URL (e.g., "Crown+Honda" → "Crown Honda")
-                        url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
-                        if url_parts:
-                            dealership_name = url_parts.split('@')[0].replace('+', ' ')
-                    except:
-                        pass
+                    # Try to extract name from URL (e.g., "Crown+Honda" → "Crown Honda")
+                    url_parts = business_url.split('/place/')[1].split('/')[0] if '/place/' in business_url else None
+                    if url_parts:
+                        dealership_name = url_parts.split('@')[0].replace('+', ' ')
+                except:
+                    pass
                 
                 # Add or get dealership
                 dealership_id = db.add_dealership(dealership_name, business_url)
@@ -220,6 +220,7 @@ def main():
                                         review['review_date']
                                     )
                                     new_reviews_count += 1
+                                    total_emails_sent += 1  # Track emails sent in this run
                                 else:
                                     print("   ❌ Failed to send email")
                             else:
@@ -233,20 +234,12 @@ def main():
                         print(f"   → Skipping this review and continuing with next one...")
                         continue
                 
-                    # Update dealership last scraped time
-                    db.update_dealership_last_scraped(dealership_id)
-                    
-                    # Update totals
-                    total_new_reviews += new_reviews_count
-                    total_tracked_reviews += len(tracked_reviews)
+                # Update dealership last scraped time (after processing all reviews)
+                db.update_dealership_last_scraped(dealership_id)
                 
-                except Exception as dealership_error:
-                    print(f"\n❌ CRITICAL ERROR processing {dealership_name}:")
-                    print(f"   Error: {dealership_error}")
-                    import traceback
-                    print(f"   Traceback:\n{traceback.format_exc()}")
-                    print(f"   → Continuing to next dealership...\n")
-                    # Continue to next dealership even on error
+                # Update totals
+                total_new_reviews += new_reviews_count
+                total_tracked_reviews += len(tracked_reviews)
                 
                 # Add delay between dealerships to prevent rate limiting
                 if idx < len(business_urls):  # Not the last dealership
@@ -280,7 +273,8 @@ def main():
         stats = db.get_stats()  # Get global stats across all dealerships
         print(f"📊 Total reviews tracked: {stats['total_reviews']}")
         print(f"⭐ Reviews with tracked ratings ({ratings_str}-star): {total_tracked_reviews}")
-        print(f"📧 Total notifications sent: {stats['notified_count']}")
+        print(f"📧 Notifications sent (this run): {total_emails_sent}")
+        print(f"📧 Total notifications sent (all time): {stats['notified_count']}")
     
     except Exception as e:
         print(f"\n❌ Error during execution: {str(e)}")
