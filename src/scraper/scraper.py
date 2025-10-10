@@ -204,7 +204,7 @@ class GoogleReviewsScraper:
             from datetime import datetime
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Navigating to: {business_url}")
-            page.goto(business_url, wait_until='domcontentloaded', timeout=30000)
+            page.goto(business_url, wait_until='domcontentloaded', timeout=60000)  # 60s timeout for slower Docker environments
             print(f"[{datetime.now().strftime('%H:%M:%S')}] ✓ Page loaded")
             
             self._random_delay(2, 4)
@@ -404,8 +404,9 @@ class GoogleReviewsScraper:
             # Wait for DOM to stabilize after all More button clicks
             print("[DIAG] More expansion done, waiting for render...")
             print("⏳ Waiting for text expansion to complete...")
-            # Need more time when many buttons were clicked (about 0.15s per expansion minimum)
-            wait_time = min(15, max(8, expanded_count * 0.15))
+            # Docker/Render environments need more time for JS rendering
+            # Min 20s base + 1s per expansion (max 45s total)
+            wait_time = min(45, max(20, expanded_count * 1.0))
             print(f"   (waiting {wait_time:.1f} seconds for {expanded_count} expansions to render)")
             time.sleep(wait_time)
             
