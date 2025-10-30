@@ -524,6 +524,25 @@ class GoogleReviewsScraper:
         
         print(f"✓ Pass 1 complete: Extracted {len(reviews)} reviews")
         
+        # DEDUPLICATE: Remove duplicate DOM elements for same reviewer (keep version with most text)
+        if reviews:
+            seen_reviewers = {}
+            for review in reviews:
+                name = review['reviewer_name']
+                if name not in seen_reviewers:
+                    seen_reviewers[name] = review
+                else:
+                    # Keep the version with more text
+                    old_len = len(seen_reviewers[name].get('review_text', ''))
+                    new_len = len(review.get('review_text', ''))
+                    if new_len > old_len:
+                        seen_reviewers[name] = review
+            
+            removed = len(reviews) - len(seen_reviewers)
+            reviews = list(seen_reviewers.values())
+            if removed > 0:
+                print(f"🔄 Removed {removed} duplicate DOM elements (kept version with most text)")
+        
         # FILTER: Only keep reviews with tracked star ratings BEFORE checking duplicates
         # This prevents wasting time clicking report URLs for ratings we don't track
         if star_ratings_to_track:
