@@ -495,12 +495,14 @@ class GoogleReviewsScraper:
                 if not review_date:
                     review_date = "Unknown date"
                 
-                # Only add if we have the essential data
-                if reviewer_name and review_text:
+                # Only add if we have the essential data (name required, text optional)
+                if reviewer_name:
                     # Log text length to verify More button expansion worked
-                    text_len = len(review_text)
-                    # Log ALL reviews with short text (likely truncated)
-                    if text_len < 300:
+                    text_len = len(review_text) if review_text else 0
+                    # Log ALL reviews with short or no text
+                    if text_len == 0:
+                        print(f"  ⚠️ NO TEXT: {reviewer_name}: 0 chars (star rating only)")
+                    elif text_len < 300:
                         print(f"  ⚠️ SHORT TEXT: {reviewer_name}: {text_len} chars")
                     
                     review = {
@@ -513,13 +515,8 @@ class GoogleReviewsScraper:
                     }
                     reviews.append(review)
                 else:
-                    # Log skipped reviews for debugging
-                    reason = []
-                    if not reviewer_name:
-                        reason.append("no name")
-                    if not review_text:
-                        reason.append("no text")
-                    print(f"⊘ Skipped review #{idx}: {', '.join(reason)} | Rating: {star_rating}-star")
+                    # Log skipped reviews for debugging (only if no name)
+                    print(f"⊘ Skipped review #{idx}: no name | Rating: {star_rating}-star")
                     
             except Exception as e:
                 print(f"Error extracting review #{idx}: {e}")

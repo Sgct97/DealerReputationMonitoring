@@ -197,12 +197,21 @@ def main():
                             # Only analyze with AI on incremental runs AND if not a new rating being tracked
                             ai_analysis = None
                             if not is_initial_run and not is_new_rating_for_dealership:
-                                print("   🤖 Analyzing with AI...")
-                                ai_analysis = analyzer.analyze_review(
-                                    review['review_text'],
-                                    review['reviewer_name']
-                                )
-                                print(f"   ✓ Recommended category: {ai_analysis['category']}")
+                                # Check if review has text before sending to AI
+                                if review['review_text'] and review['review_text'].strip():
+                                    print("   🤖 Analyzing with AI...")
+                                    ai_analysis = analyzer.analyze_review(
+                                        review['review_text'],
+                                        review['reviewer_name']
+                                    )
+                                    print(f"   ✓ Recommended category: {ai_analysis['category']}")
+                                else:
+                                    # No text to analyze - use default category
+                                    print("   🤖 AI analysis skipped (no review text)")
+                                    ai_analysis = {
+                                        'category': 'Inappropriate or off topic',
+                                        'reasoning': 'Review has no text content - star rating only'
+                                    }
                             else:
                                 if is_initial_run:
                                     print("   🤖 AI analysis skipped (initial run - baseline data)")

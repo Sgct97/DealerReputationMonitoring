@@ -189,7 +189,7 @@ class EmailNotifier:
                 <strong>Date Posted:</strong> {review_data['review_date']}
             </div>
             <div class="review-text">
-                "{review_data['review_text']}"
+                {'<em style="color: #999; font-style: italic;">[No text - Customer only left a star rating]</em>' if not review_data['review_text'] or not review_data['review_text'].strip() else f'"{review_data["review_text"]}"'}
             </div>
         </div>
         
