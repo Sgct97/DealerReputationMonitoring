@@ -727,16 +727,22 @@ class GoogleReviewsScraper:
             new_page.close()
             print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Tab closed, parsing URL...")
             
-            # Extract the real report URL from continue parameter
+            # Check if we got a direct report URL (no-text reviews) or wrapped in continue param (text reviews)
+            if '/report' in signin_url and 'postId' in signin_url:
+                # Direct report URL - use as-is
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got direct report URL!")
+                return signin_url
+            
+            # Extract from continue parameter (older format)
             parsed = urlparse(signin_url)
             params = parse_qs(parsed.query)
             
             if 'continue' in params:
                 real_report_url = unquote(params['continue'][0])
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL from continue param!")
                 return real_report_url
             else:
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param in URL")
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No report URL found")
                     
         except Exception as e:
             print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ Error getting report URL: {e}")
