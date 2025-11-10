@@ -152,7 +152,8 @@ class GoogleReviewsScraper:
         Returns:
             List of dictionaries, each containing review data
         """
-        # Retry logic with exponential backoff
+        # Retry logic with exponential backoff and proxy fallback
+        proxy_failed = False
         for attempt in range(self.max_retries):
             try:
                 if attempt > 0:
@@ -160,7 +161,25 @@ class GoogleReviewsScraper:
                     print(f"\n🔄 Retry attempt {attempt + 1}/{self.max_retries} (waiting {wait_time}s first...)")
                     time.sleep(wait_time)
                 
-                reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track, skip_report_urls)
+                # If proxy failed and this is the last attempt, try without proxy
+                if proxy_failed and attempt == self.max_retries - 1:
+                    print("⚠️  Proxy connection failed on all attempts. Trying final attempt WITHOUT proxy...")
+                    original_proxy = self.proxy_config
+                    self.proxy_config = None
+                    if self.browser:
+                        self.close()
+                    self.start()
+                    
+                    try:
+                        reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track, skip_report_urls)
+                    finally:
+                        # Restore proxy config for next run
+                        self.proxy_config = original_proxy
+                        if self.browser:
+                            self.close()
+                        self.start()
+                else:
+                    reviews = self._scrape_reviews_internal(business_url, db_manager, dealership_id, stop_at_seen, scrape_all, max_reviews, star_ratings_to_track, skip_report_urls)
                 
                 if reviews:  # Success!
                     return reviews
@@ -168,7 +187,14 @@ class GoogleReviewsScraper:
                     print(f"⚠️ Got 0 reviews - retrying...")
                     
             except Exception as e:
-                print(f"❌ Attempt {attempt + 1} failed: {str(e)}")
+                error_msg = str(e)
+                print(f"❌ Attempt {attempt + 1} failed: {error_msg}")
+                
+                # Check if it's a proxy connection error
+                if "ERR_TUNNEL_CONNECTION_FAILED" in error_msg:
+                    print("🚫 Detected proxy connection failure")
+                    proxy_failed = True
+                
                 if attempt == self.max_retries - 1:
                     # Last attempt failed - log and raise
                     print(f"💥 All {self.max_retries} attempts failed")
