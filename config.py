@@ -16,6 +16,8 @@ OPENAI_API_KEY=sk-your-api-key-here
 GMAIL_ADDRESS=your-email@gmail.com
 GMAIL_APP_PASSWORD=your-app-password-here
 TO_EMAIL=client@example.com
+CC_EMAIL=developer@example.com  # Optional: CC on review alerts (e.g., for monitoring)
+DEVELOPER_EMAIL=developer@example.com  # Receives error alerts only (not review alerts)
 
 # Residential Proxy Configuration (HIGHLY RECOMMENDED)
 # Example providers: BrightData, Smartproxy, Oxylabs

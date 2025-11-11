@@ -14,18 +14,22 @@ from datetime import datetime
 class EmailNotifier:
     """Sends email notifications for new reviews via Gmail SMTP."""
     
-    def __init__(self, gmail_address: str, gmail_app_password: str, to_email: str):
+    def __init__(self, gmail_address: str, gmail_app_password: str, to_email: str, cc_email: str = None, developer_email: str = None):
         """
         Initialize the email notifier with Gmail SMTP.
         
         Args:
             gmail_address: Your Gmail address (e.g., youremail@gmail.com)
             gmail_app_password: Gmail App Password (NOT your regular password)
-            to_email: Email address to send notifications to
+            to_email: Primary email address to send review notifications to
+            cc_email: Optional CC email for review notifications (e.g., developer monitoring)
+            developer_email: Email for error alerts (defaults to to_email if not provided)
         """
         self.gmail_address = gmail_address
         self.gmail_app_password = gmail_app_password
         self.to_email = to_email
+        self.cc_email = cc_email
+        self.developer_email = developer_email or to_email
     
     def send_review_alert(self, review_data: Dict, ai_analysis: Dict) -> bool:
         """
@@ -47,6 +51,8 @@ class EmailNotifier:
         message['Subject'] = subject
         message['From'] = self.gmail_address
         message['To'] = self.to_email
+        if self.cc_email:
+            message['Cc'] = self.cc_email
         
         # Attach HTML content
         html_part = MIMEText(html_content, 'html')
@@ -222,6 +228,7 @@ class EmailNotifier:
     def send_failure_alert(self, subject: str, html_body: str) -> bool:
         """
         Send a failure alert email when scraping fails.
+        Sends to developer_email (not to_email) to avoid alerting end customers about technical issues.
         
         Args:
             subject: Email subject
@@ -234,7 +241,7 @@ class EmailNotifier:
         message = MIMEMultipart('alternative')
         message['Subject'] = subject
         message['From'] = self.gmail_address
-        message['To'] = self.to_email
+        message['To'] = self.developer_email
         
         # Attach HTML content
         html_part = MIMEText(html_body, 'html')

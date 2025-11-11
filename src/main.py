@@ -31,6 +31,8 @@ def main():
     gmail_address = os.getenv('GMAIL_ADDRESS')
     gmail_app_password = os.getenv('GMAIL_APP_PASSWORD')
     to_email = os.getenv('TO_EMAIL')
+    cc_email = os.getenv('CC_EMAIL')  # Optional: CC on review alerts
+    developer_email = os.getenv('DEVELOPER_EMAIL')  # Optional: receives error alerts
     database_path = os.getenv('DATABASE_PATH', './data/reviews.db')
     initial_scrape_limit = int(os.getenv('INITIAL_SCRAPE_LIMIT', '75'))  # 0 = unlimited
     
@@ -96,7 +98,7 @@ def main():
     analyzer = ReviewAnalyzer(openai_api_key)
     
     print("📧 Initializing email notifier...")
-    notifier = EmailNotifier(gmail_address, gmail_app_password, to_email)
+    notifier = EmailNotifier(gmail_address, gmail_app_password, to_email, cc_email, developer_email)
     
     # Track totals across all dealerships
     total_new_reviews = 0
