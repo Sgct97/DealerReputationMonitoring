@@ -454,7 +454,30 @@ class GoogleReviewsScraper:
                     if newest_option.is_visible():
                         newest_option.click()
                         print("✓ Switched to 'Newest' sort")
-                        self._random_delay(2, 3)  # Wait for page to reload
+                        self._random_delay(2, 3)  # Initial wait for sort to trigger
+                        
+                        # CRITICAL: Wait for review containers to load after sort change
+                        print("⏳ Waiting for reviews to reload after sort change...")
+                        print(f"   [DEBUG] Looking for selector: {SELECTORS['REVIEW_CONTAINER'][0]}")
+                        try:
+                            page.wait_for_selector(SELECTORS['REVIEW_CONTAINER'][0], timeout=30000)
+                            print("   ✓ Review containers found via wait_for_selector")
+                        except Exception as wait_err:
+                            print(f"   ⚠️ wait_for_selector failed: {wait_err}")
+                            print(f"   → Attempting manual check...")
+                        
+                        # Verify containers are actually present
+                        test_elements = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
+                        print(f"   [DEBUG] Found {len(test_elements)} review containers after sort switch")
+                        
+                        if len(test_elements) == 0:
+                            print(f"   ⚠️ WARNING: No review containers found!")
+                            print(f"   [DEBUG] Page URL: {page.url}")
+                            print(f"   [DEBUG] Taking diagnostic screenshot...")
+                            page.screenshot(path='data/newest_sort_failed.png')
+                        
+                        self._random_delay(2, 3)  # Additional stabilization time
+                        print("✓ Reviews reloaded, proceeding with scroll")
                         
                         # Limited scroll (covers ~50-100 most recent reviews)
                         print("📜 Scrolling to load recent reviews...")
@@ -465,6 +488,10 @@ class GoogleReviewsScraper:
                             self._random_delay(1, 2)
                         
                         print(f"✓ Scrolled {newest_scroll_count} times in 'Newest' sort")
+                        
+                        # Verify containers again after scrolling
+                        test_elements_after = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
+                        print(f"   [DEBUG] Found {len(test_elements_after)} review containers after scrolling")
                         
                         # Expand "More" buttons for these reviews
                         print("🔽 Expanding 'More' buttons for recent reviews...")
@@ -488,7 +515,11 @@ class GoogleReviewsScraper:
                         
                         # Extract reviews from "Newest" sort (WITH Pass 2 for new reviews)
                         print("📊 Extracting reviews from 'Newest' sort...")
+                        print(f"   [DEBUG] Calling _extract_reviews for 'Newest' sort")
+                        print(f"   [DEBUG] star_ratings_to_track: {star_ratings_to_track}")
+                        print(f"   [DEBUG] skip_report_urls: {skip_report_urls}")
                         reviews_from_newest = self._extract_reviews(page, context, db_manager=None, dealership_id=None, star_ratings_to_track=star_ratings_to_track, skip_report_urls=skip_report_urls)
+                        print(f"   [DEBUG] _extract_reviews returned {len(reviews_from_newest)} total reviews")
                         
                         # Filter to only low-star reviews
                         reviews_from_newest = [r for r in reviews_from_newest if r['star_rating'] in star_ratings_to_track]
@@ -567,17 +598,28 @@ class GoogleReviewsScraper:
         """
         # Find all review containers using multiple fallback selectors
         review_elements = None
-        for selector in SELECTORS['REVIEW_CONTAINER']:
+        print(f"[DEBUG] Attempting to find review containers...")
+        print(f"[DEBUG] Available selectors: {SELECTORS['REVIEW_CONTAINER']}")
+        
+        for idx, selector in enumerate(SELECTORS['REVIEW_CONTAINER']):
             try:
+                print(f"[DEBUG] Trying selector {idx+1}/{len(SELECTORS['REVIEW_CONTAINER'])}: {selector}")
                 elements = page.query_selector_all(selector)
+                print(f"[DEBUG] Selector returned {len(elements)} elements")
                 if elements and len(elements) > 0:
                     review_elements = elements
                     print(f"✓ Using review container selector: {selector}")
                     break
-            except:
+                else:
+                    print(f"[DEBUG] Selector found 0 elements, trying next...")
+            except Exception as sel_err:
+                print(f"[DEBUG] Selector failed with error: {sel_err}")
                 continue
         
         if not review_elements:
+            print(f"[DEBUG] FAILURE: No selectors found any review containers")
+            print(f"[DEBUG] Page URL: {page.url}")
+            print(f"[DEBUG] Page title: {page.title()}")
             raise Exception("Could not find review containers with any known selector")
         
         print(f"Found {len(review_elements)} review elements")
