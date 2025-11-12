@@ -365,12 +365,6 @@ class GoogleReviewsScraper:
                     if approx_reviews >= max_reviews:
                         print(f"✓ Reached review limit ({max_reviews} reviews)")
                         break
-                
-                # Safety limit (very high for unlimited mode)
-                safety_limit = 500 if max_reviews == 0 else 100
-                if scroll_count >= safety_limit:
-                    print(f"⚠️  Reached safety limit of {safety_limit} scrolls")
-                    break
             
             # Get final count using first available selector
             current_elements = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
