@@ -432,12 +432,112 @@ class GoogleReviewsScraper:
             
             print("[DIAG] Starting review extraction...")
             # Extract review data (will capture report URL for each review unless skip_report_urls=True)
-            reviews = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track, skip_report_urls)
+            reviews_from_lowest = self._extract_reviews(page, context, db_manager, dealership_id, star_ratings_to_track, skip_report_urls)
             
-            print(f"[DIAG] Extraction complete, got {len(reviews)} reviews")
-            print(f"Successfully scraped {len(reviews)} reviews")
+            print(f"[DIAG] Extraction complete, got {len(reviews_from_lowest)} reviews from 'Lowest rating' sort")
             
-            return reviews
+            # FINAL SAFETY CHECK: Switch to "Newest" sort to catch reviews stuck in moderation/indexing
+            print(f"\n{'='*60}")
+            print(f"🔍 FINAL CHECK: Scanning 'Newest' sort for missed low-star reviews")
+            print(f"{'='*60}")
+            
+            try:
+                # Click sort button to open dropdown
+                print("📋 Switching to 'Newest' sort...")
+                sort_button = page.locator("button[data-value='Sort']").first
+                if sort_button.is_visible():
+                    sort_button.click()
+                    self._random_delay(1, 2)
+                    
+                    # Click "Newest" option
+                    newest_option = page.locator("div[data-index='1']").first  # "Newest" is typically index 1
+                    if newest_option.is_visible():
+                        newest_option.click()
+                        print("✓ Switched to 'Newest' sort")
+                        self._random_delay(2, 3)  # Wait for page to reload
+                        
+                        # Limited scroll (covers ~50-100 most recent reviews)
+                        print("📜 Scrolling to load recent reviews...")
+                        newest_scroll_count = 10  # Fixed limit
+                        for i in range(newest_scroll_count):
+                            page.keyboard.press('PageDown')
+                            page.keyboard.press('PageDown')
+                            self._random_delay(1, 2)
+                        
+                        print(f"✓ Scrolled {newest_scroll_count} times in 'Newest' sort")
+                        
+                        # Expand "More" buttons for these reviews
+                        print("🔽 Expanding 'More' buttons for recent reviews...")
+                        more_buttons_newest = page.query_selector_all(SELECTORS['MORE_BUTTON'][0])
+                        expanded_newest = 0
+                        for button in more_buttons_newest[:100]:  # Limit to first 100
+                            try:
+                                if button.is_visible():
+                                    button.scroll_into_view_if_needed()
+                                    button.click()
+                                    expanded_newest += 1
+                            except:
+                                pass
+                        
+                        if expanded_newest > 0:
+                            print(f"✓ Expanded {expanded_newest} reviews from 'Newest' sort")
+                            # Wait for expansion
+                            wait_time = min(30, max(10, expanded_newest * 0.5))
+                            print(f"   (waiting {wait_time:.1f} seconds for expansions to render)")
+                            time.sleep(wait_time)
+                        
+                        # Extract reviews from "Newest" sort (WITH Pass 2 for new reviews)
+                        print("📊 Extracting reviews from 'Newest' sort...")
+                        reviews_from_newest = self._extract_reviews(page, context, db_manager=None, dealership_id=None, star_ratings_to_track=star_ratings_to_track, skip_report_urls=skip_report_urls)
+                        
+                        # Filter to only low-star reviews
+                        reviews_from_newest = [r for r in reviews_from_newest if r['star_rating'] in star_ratings_to_track]
+                        print(f"✓ Found {len(reviews_from_newest)} low-star reviews from 'Newest' sort")
+                        
+                        # Merge with "Lowest rating" results (dedupe by reviewer name, keep longest text)
+                        if reviews_from_newest:
+                            print("🔄 Merging with 'Lowest rating' results...")
+                            seen_reviewers = {}
+                            
+                            # Add all from "Lowest rating" first (priority)
+                            for review in reviews_from_lowest:
+                                name = review['reviewer_name']
+                                seen_reviewers[name] = review
+                            
+                            # Add from "Newest" only if not seen, or if text is longer
+                            added_from_newest = 0
+                            for review in reviews_from_newest:
+                                name = review['reviewer_name']
+                                if name not in seen_reviewers:
+                                    seen_reviewers[name] = review
+                                    added_from_newest += 1
+                                else:
+                                    # Keep version with more text
+                                    old_len = len(seen_reviewers[name].get('review_text', ''))
+                                    new_len = len(review.get('review_text', ''))
+                                    if new_len > old_len:
+                                        seen_reviewers[name] = review
+                            
+                            reviews_from_lowest = list(seen_reviewers.values())
+                            
+                            if added_from_newest > 0:
+                                print(f"✅ Added {added_from_newest} NEW low-star reviews from 'Newest' sort")
+                            else:
+                                print(f"✓ No new reviews found in 'Newest' sort (all already captured)")
+                        else:
+                            print("✓ No additional low-star reviews found in 'Newest' sort")
+                    else:
+                        print("⚠️ Could not find 'Newest' option - skipping final check")
+                else:
+                    print("⚠️ Could not find sort button - skipping final check")
+                    
+            except Exception as newest_error:
+                print(f"⚠️ 'Newest' sort check failed: {newest_error}")
+                print(f"   → Continuing with {len(reviews_from_lowest)} reviews from 'Lowest rating' sort")
+            
+            print(f"\n✓ Total reviews after final check: {len(reviews_from_lowest)}")
+            
+            return reviews_from_lowest
             
         except Exception as e:
             print(f"Error during scraping: {str(e)}")
