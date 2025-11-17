@@ -425,8 +425,8 @@ class GoogleReviewsScraper:
             print("[DIAG] More expansion done, waiting for render...")
             print("⏳ Waiting for text expansion to complete...")
             # Docker/Render environments need more time for JS rendering
-            # Min 20s base + 1s per expansion (max 45s total)
-            wait_time = min(45, max(20, expanded_count * 1.0))
+            # 20s base + 1s per expansion (max 45s total)
+            wait_time = min(45, 20 + (expanded_count * 1.0))
             print(f"   (waiting {wait_time:.1f} seconds for {expanded_count} expansions to render)")
             time.sleep(wait_time)
             
@@ -898,8 +898,12 @@ class GoogleReviewsScraper:
                     real_report_url = unquote(params['continue'][0])
                     print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
                     return real_report_url
+                elif '/report' in signin_url and 'postId' in signin_url:
+                    # Some reviews (especially no-text ones) go directly to report URL without continue param
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got direct report URL (no continue param needed)")
+                    return signin_url
                 else:
-                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param in URL")
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param and not a direct report URL")
             finally:
                 # CRITICAL: Always close the new page to prevent memory leaks
                 try:
