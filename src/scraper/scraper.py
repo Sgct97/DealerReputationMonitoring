@@ -891,22 +891,22 @@ class GoogleReviewsScraper:
             new_page = new_page_info.value
             
             try:
-            signin_url = new_page.url
-            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
-            
-            # Extract the real report URL from continue parameter
-            parsed = urlparse(signin_url)
-            params = parse_qs(parsed.query)
-            
-            if 'continue' in params:
-                real_report_url = unquote(params['continue'][0])
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
-                return real_report_url
+                signin_url = new_page.url
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
+                
+                # Extract the real report URL from continue parameter
+                parsed = urlparse(signin_url)
+                params = parse_qs(parsed.query)
+                
+                if 'continue' in params:
+                    real_report_url = unquote(params['continue'][0])
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
+                    return real_report_url
                 elif '/report' in signin_url and 'postId' in signin_url:
                     # Some reviews (especially no-text ones) go directly to report URL without continue param
                     print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got direct report URL (no continue param needed)")
                     return signin_url
-            else:
+                else:
                     print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param and not a direct report URL")
             finally:
                 # CRITICAL: Always close the new page to prevent memory leaks
