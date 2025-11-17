@@ -885,23 +885,28 @@ class GoogleReviewsScraper:
             print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Clicked Report review, getting new page...")
             # Get the new page (sign-in redirect)
             new_page = new_page_info.value
-            signin_url = new_page.url
-            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
             
-            # Close the tab immediately
-            new_page.close()
-            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Tab closed, parsing URL...")
-            
-            # Extract the real report URL from continue parameter
-            parsed = urlparse(signin_url)
-            params = parse_qs(parsed.query)
-            
-            if 'continue' in params:
-                real_report_url = unquote(params['continue'][0])
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
-                return real_report_url
-            else:
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param in URL")
+            try:
+                signin_url = new_page.url
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
+                
+                # Extract the real report URL from continue parameter
+                parsed = urlparse(signin_url)
+                params = parse_qs(parsed.query)
+                
+                if 'continue' in params:
+                    real_report_url = unquote(params['continue'][0])
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
+                    return real_report_url
+                else:
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param in URL")
+            finally:
+                # CRITICAL: Always close the new page to prevent memory leaks
+                try:
+                    new_page.close()
+                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Tab closed")
+                except:
+                    pass  # Page might already be closed
                     
         except Exception as e:
             print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ Error getting report URL: {e}")
