@@ -785,22 +785,22 @@ class GoogleReviewsScraper:
                     
                     # Note: We skip element validation because is_visible() can hang on stale elements
                     # Instead, we'll catch exceptions in _get_report_url_by_clicking
-                print(f"      Calling _get_report_url_by_clicking...")
-                # Get direct report URL by clicking through the UI
-                review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
-                review['review_url'] = review_url
-                
-                # Remove element reference (don't need it anymore)
-                del review['element']
-                
-                print(f"      ✓ Got report URL for {reviewer_name}")
-                
-            except Exception as e:
-                print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
-                # Use fallback URL
-                review['review_url'] = page.url
-                if 'element' in review:
+                    print(f"      Calling _get_report_url_by_clicking...")
+                    # Get direct report URL by clicking through the UI
+                    review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                    review['review_url'] = review_url
+                    
+                    # Remove element reference (don't need it anymore)
                     del review['element']
+                    
+                    print(f"      ✓ Got report URL for {reviewer_name}")
+                    
+                except Exception as e:
+                    print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
+                    # Use fallback URL
+                    review['review_url'] = page.url
+                    if 'element' in review:
+                        del review['element']
         
         print(f"\n✓ Pass 2 complete: Added report URLs")
         
