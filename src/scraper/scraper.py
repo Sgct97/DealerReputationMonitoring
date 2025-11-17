@@ -364,7 +364,7 @@ class GoogleReviewsScraper:
                     approx_reviews = len(current_elements) // 2
                     if approx_reviews >= max_reviews:
                         print(f"✓ Reached review limit ({max_reviews} reviews)")
-                        break
+                    break
             
             # Get final count using first available selector
             current_elements = page.query_selector_all(SELECTORS['REVIEW_CONTAINER'][0])
@@ -425,8 +425,12 @@ class GoogleReviewsScraper:
             print("[DIAG] More expansion done, waiting for render...")
             print("⏳ Waiting for text expansion to complete...")
             # Docker/Render environments need more time for JS rendering
-            # 20s base + 1s per expansion (max 45s total)
-            wait_time = min(45, 20 + (expanded_count * 1.0))
+            # Smart scaling: First 50 buttons get 1s each (DOM stabilization)
+            #                After 50, only 0.5s each (incremental updates)
+            if expanded_count <= 50:
+                wait_time = 20 + (expanded_count * 1.0)
+            else:
+                wait_time = 70 + ((expanded_count - 50) * 0.5)
             print(f"   (waiting {wait_time:.1f} seconds for {expanded_count} expansions to render)")
             time.sleep(wait_time)
             
@@ -781,24 +785,24 @@ class GoogleReviewsScraper:
                     
                     # Note: We skip element validation because is_visible() can hang on stale elements
                     # Instead, we'll catch exceptions in _get_report_url_by_clicking
-                    print(f"      Calling _get_report_url_by_clicking...")
-                    # Get direct report URL by clicking through the UI
-                    review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
-                    review['review_url'] = review_url
-                    
-                    # Remove element reference (don't need it anymore)
+                print(f"      Calling _get_report_url_by_clicking...")
+                # Get direct report URL by clicking through the UI
+                review_url = self._get_report_url_by_clicking(element, page, context, reviewer_name)
+                review['review_url'] = review_url
+                
+                # Remove element reference (don't need it anymore)
+                del review['element']
+                
+                print(f"      ✓ Got report URL for {reviewer_name}")
+                
+            except Exception as e:
+                print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
+                # Use fallback URL
+                review['review_url'] = page.url
+                if 'element' in review:
                     del review['element']
-                    
-                    print(f"      ✓ Got report URL for {reviewer_name}")
-                    
-                except Exception as e:
-                    print(f"      ❌ ERROR for {reviewer_name}: {type(e).__name__}: {str(e)}")
-                    # Use fallback URL
-                    review['review_url'] = page.url
-                    if 'element' in review:
-                        del review['element']
-            
-            print(f"\n✓ Pass 2 complete: Added report URLs")
+        
+        print(f"\n✓ Pass 2 complete: Added report URLs")
         
         return reviews
     
@@ -887,22 +891,22 @@ class GoogleReviewsScraper:
             new_page = new_page_info.value
             
             try:
-                signin_url = new_page.url
-                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
-                
-                # Extract the real report URL from continue parameter
-                parsed = urlparse(signin_url)
-                params = parse_qs(parsed.query)
-                
-                if 'continue' in params:
-                    real_report_url = unquote(params['continue'][0])
-                    print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
-                    return real_report_url
+            signin_url = new_page.url
+            print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got sign-in URL, closing tab...")
+            
+            # Extract the real report URL from continue parameter
+            parsed = urlparse(signin_url)
+            params = parse_qs(parsed.query)
+            
+            if 'continue' in params:
+                real_report_url = unquote(params['continue'][0])
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got report URL!")
+                return real_report_url
                 elif '/report' in signin_url and 'postId' in signin_url:
                     # Some reviews (especially no-text ones) go directly to report URL without continue param
                     print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ✓ Got direct report URL (no continue param needed)")
                     return signin_url
-                else:
+            else:
                     print(f"  [{datetime.now().strftime('%H:%M:%S')}]   ⚠️ No continue param and not a direct report URL")
             finally:
                 # CRITICAL: Always close the new page to prevent memory leaks
