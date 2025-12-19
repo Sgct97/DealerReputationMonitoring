@@ -22,6 +22,11 @@ from notifications.emailer import EmailNotifier
 def main():
     """Main execution function."""
     
+    print("="*80)
+    print("🚀 DEALER REPUTATION KEEPER - SERVICE STARTING")
+    print(f"📅 Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print("="*80)
+    
     # Load environment variables
     load_dotenv()
     
@@ -339,19 +344,37 @@ if __name__ == "__main__":
         # Background Worker mode: run on a schedule
         interval = int(run_interval_hours)
         print(f"🔄 Background Worker mode: Running every {interval} hour(s)")
+        print(f"⏰ Current time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Schedule the job
         schedule.every(interval).hours.do(main)
         
         # Run immediately on startup
         print("🚀 Running initial scrape...")
-        main()
+        try:
+            main()
+        except Exception as e:
+            print(f"❌ Initial scrape failed: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Keep running forever, checking schedule
-        print(f"⏰ Next run scheduled in {interval} hour(s)")
+        print(f"⏰ Next run scheduled in {interval} hour(s) at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + interval * 3600))}")
+        print("💤 Entering schedule loop (checking every 60 seconds)...")
+        
+        loop_count = 0
         while True:
-            schedule.run_pending()
-            time.sleep(60)  # Check every minute
+            try:
+                schedule.run_pending()
+                loop_count += 1
+                if loop_count % 60 == 0:  # Log every hour
+                    print(f"💓 Service alive - {loop_count // 60} hour(s) in schedule loop")
+                time.sleep(60)  # Check every minute
+            except Exception as e:
+                print(f"❌ Schedule loop error: {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(60)  # Continue despite errors
     else:
         # Cron Job mode: run once and exit
         print("⚡ Cron Job mode: Running once")
